@@ -1,0 +1,5 @@
+🔥 Comparaison visuelle des scores : Graphiques interactifs pour voir comment chaque modèle se comporte selon différentes métriques.
+
+✅ Générer un rapport automatique → PDF ou Markdown récapitulant l’expérimentation.
+✅ Offrir une API ou export du modèle → Pour que l’utilisateur puisse récupérer un modèle prêt à l’emploi (.pkl, .joblib, ONNX).
+✅ Ajoute des fonctionnalités intelligentes → Ex. détection automatique des modèles inadaptés, pré-traitement optimisé des données, recommandations basées sur la nature du dataset.
