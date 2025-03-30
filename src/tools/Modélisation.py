@@ -367,7 +367,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
     
     elif model_type == "SVM":
         # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 1e-2, 1e2, log=True)
+        C = trial.suggest_float("C", 0.01, 20, log=True)
         kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
         degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
         gamma = trial.suggest_categorical("gamma", ["scale", "auto"])
@@ -515,16 +515,16 @@ pca_option = "Nombre de composantes"
 
 
 
-# cv = 7
-# scoring_comp = "accuracy"
-# scoring_val = ['accuracy','f1_weighted']
-# models = ["Random Forest","KNN", 'Logistic Regression','SVM']
-# task = "Classification" # "Classification", "Regression"
-# target="species"
-# if task == "Classification" and len(df[target].unique()) > 2:
-#     multi_class = True
-# else:
-#     multi_class = False
+cv = 7
+scoring_comp = "accuracy"
+scoring_eval = ['accuracy','f1_weighted']
+models = ["Random Forest","KNN", 'Logistic Regression','SVM']
+task = "Classification" # "Classification", "Regression"
+target="species"
+if task == "Classification" and len(df[target].unique()) > 2:
+    multi_class = True
+else:
+    multi_class = False
 
 
 # 1. Analyser la corrélation des valeurs manquantes
@@ -634,15 +634,15 @@ for model in models:
                                                          cv=cv,
                                                          scoring=scoring_comp,
                                                          multi_class=multi_class,
-                                                         n_trials=20,
+                                                         n_trials=5,
                                                          n_jobs=-1)
     
     # Ajouter les résultats à la liste
     results.append({
-        'Model': model,  # Nom du modèle
+        'Model': str(model),
         'Best Score': best_value,
-        'Best Model': best_model
-    })
+        'Best Model': best_model,
+        'Best Model str': str(best_model)})
 
 # Créer un DataFrame à partir des résultats
 df_train = pd.DataFrame(results)
@@ -653,24 +653,26 @@ if task == "Regression":
 else:
     df_train['Best Score'] = (df_train['Best Score']*100).round(2)
 
+df_train = df_train[['Model', 'Best Model', 'Best Score']]
+
 # 7. Evaluer les meilleurs modèles
-df_models=df_train['Best Model']
+list_models = df_train['Best Model'].tolist()
 
 list_score = []
-for i in df_models:
-    scores = cross_validate(i, X, y, cv=cv, scoring=scoring_val, n_jobs=-1)
-    mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_val}
-    std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_val}
-    
+for model in list_models:  # Utilise les vrais objets modèles
+    scores = cross_validate(model, X, y, cv=cv, scoring=scoring_eval, n_jobs=-1)
+    mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
+    std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
+
     list_score.append({
-        'Model': i,
+        'Model': str(model),  # Affichage du nom seulement
         'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
         'Std Scores': std_scores
     })
 
 df_score = pd.DataFrame(list_score)
 
-for metric in scoring_val:
+for metric in scoring_eval:
     df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
     df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
 
@@ -678,78 +680,75 @@ for metric in scoring_val:
 df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])    
 
 # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion
-model_mapping_classif = {
-    "Random Forest": "RandomForestClassifier",
-    "KNN": "KNeighborsClassifier",
-    "Logistic Regression": "LogisticRegression",
-    "SVM": "SVC"
-}
+# model_mapping_classif = {
+#     "Random Forest": "RandomForestClassifier",
+#     "KNN": "KNeighborsClassifier",
+#     "Logistic Regression": "LogisticRegression",
+#     "SVM": "SVC"
+# }
 
-model_mapping_reg = {
-    "Random Forest": "RandomForestRegressor",
-    "KNN": "KNeighborsRegressor",
-    "Linear Regression": "LinearRegression",
-    "SVR": "SVR"
-}
+# model_mapping_reg = {
+#     "Random Forest": "RandomForestRegressor",
+#     "KNN": "KNeighborsRegressor",
+#     "Linear Regression": "LinearRegression",
+#     "SVR": "SVR"
+# }
 
-# Sélection du bon dictionnaire selon la tâche
-model_mapping = model_mapping_classif if task == "Classification" else model_mapping_reg
+# # Sélection du bon dictionnaire selon la tâche
+# model_mapping = model_mapping_classif if task == "Classification" else model_mapping_reg
 
-# Choix du modèle par nom
-name_choose_model = "Random Forest"  # Exemple
-model = df_score.loc[df_score['Model'].astype(str).str.contains(model_mapping[name_choose_model], regex=False), 'Model'].iloc[0]
+# # Choix du modèle par nom
+# name_choose_model = "Random Forest"  # Exemple
+# model = df_score.loc[df_score['Model'].astype(str).str.contains(model_mapping[name_choose_model], regex=False), 'Model'].iloc[0]
 
-if task == "Regression":
+for model in df_score['Model']:
+    
+    if task == "Regression":
+        loss='mse'
+    else:
+        loss='0-1_loss'
+        
     expected_loss, bias, var = bias_variance_decomp(
         model,
         X_train.values, y_train.values,
         X_test.values, y_test.values,
-        loss='mse', num_rounds=200,
+        loss=loss, num_rounds=50,
         random_seed=123)
 
-    print('MSE from bias_variance lib [avg expected loss]: %.3f' % expected_loss)
-    print('Avg Bias: %.3f' % bias)
-    print('Avg Variance: %.3f' % var)
-    
-else:
-    expected_loss, bias, var = bias_variance_decomp(
-        model,
-        X_train.values, y_train.values,
-        X_test.values, y_test.values, 
-        loss='0-1_loss', num_rounds=200,
-        random_seed=123)
-
+    print(f'Study for {model}')
     print('Avg expected loss: %.3f' % expected_loss)
     print('Avg Bias: %.3f' % bias)
     print('Avg Variance: %.3f' % var)
-
-    # Prédictions pour la matrice de confusion
-    y_pred = model.predict(X_test)
-    
-    # Si multi_classe est True, on génère une matrice de confusion adaptée
-    if multi_class:
-        cm = confusion_matrix(y_test, y_pred)
+    print('\n')
         
-        # Affichage de la matrice de confusion sous forme de heatmap
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                    xticklabels=[f"Class {i}" for i in range(cm.shape[1])], 
-                    yticklabels=[f"Class {i}" for i in range(cm.shape[0])])
-        plt.title('Confusion Matrix (Multiclass)')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.show()
+    if task=='Classification':
+        # Prédictions pour la matrice de confusion
+        y_pred = model.predict(X_test)
         
-    else:
-        # Si c'est un problème binaire
-        cm = confusion_matrix(y_test, y_pred)
-        
-        # Affichage de la matrice de confusion sous forme de heatmap
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                    xticklabels=["Class 0", "Class 1"], 
-                    yticklabels=["Class 0", "Class 1"])
-        plt.title('Confusion Matrix (Binary)')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.show()
+        # Si multi_classe est True, on génère une matrice de confusion adaptée
+        if multi_class:
+            cm = confusion_matrix(y_test, y_pred)
+            
+            # Affichage de la matrice de confusion sous forme de heatmap
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                        xticklabels=[f"Class {i}" for i in range(cm.shape[1])], 
+                        yticklabels=[f"Class {i}" for i in range(cm.shape[0])])
+            plt.title('Confusion Matrix (Multiclass)')
+            plt.xlabel('Predicted')
+            plt.ylabel('True')
+            plt.show()
+            
+        else:
+            # Si c'est un problème binaire
+            cm = confusion_matrix(y_test, y_pred)
+            
+            # Affichage de la matrice de confusion sous forme de heatmap
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                        xticklabels=["Class 0", "Class 1"], 
+                        yticklabels=["Class 0", "Class 1"])
+            plt.title('Confusion Matrix (Binary)')
+            plt.xlabel('Predicted')
+            plt.ylabel('True')
+            plt.show()

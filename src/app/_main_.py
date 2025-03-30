@@ -15,7 +15,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 import optuna
 from mlxtend.evaluate import bias_variance_decomp
 from sklearn.metrics import confusion_matrix
@@ -25,6 +25,7 @@ import io
 import plotly.express as px
 from scipy.stats.mstats import winsorize
 from scipy import stats
+import pickle
 
 def correlation_missing_values(df: pd.DataFrame):
     """
@@ -284,8 +285,10 @@ def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
             # Appliquer la winsorisation aux outliers avec la proportion calculée
             df[col] = winsorize(df[col], limits=[proportion_outliers, proportion_outliers])  # Limites ajustées selon proportion_outliers
     else:
-        df = df[df['outlier'] == 0].drop(columns='outlier')  # Suppression des lignes contenant des outliers si leur proportion est faible
-
+        df = df[df['outlier'] == 0]
+    
+    df = df.drop(columns='outlier')
+        
     return df
 
 def scale_data(df: pd.DataFrame, list_standard: list[str] = None, list_minmax: list[str] = None, list_robust: list[str] = None, list_quantile: list[str] = None):   
@@ -394,14 +397,14 @@ def objective_linear(trial):
         
         if model_type == "elasticnet":
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1)
-            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
+            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
         elif model_type == "lasso":
-            model = Lasso(alpha=alpha, random_state=42)
+            model = Lasso(alpha=alpha)
         else:
-            model = Ridge(alpha=alpha, random_state=42)
+            model = Ridge(alpha=alpha)
     
     # Évaluer avec validation croisée
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring).mean()
+    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
     return score
 
 def objective_logistic(trial, multi_class=False):
@@ -410,19 +413,19 @@ def objective_logistic(trial, multi_class=False):
     
     if penalty == "elasticnet":
         l1_ratio = trial.suggest_float("l1_ratio", 0, 1)
-        model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1, random_state=42)
+        model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
     elif penalty == "l1":
         solver = "saga" if multi_class else "liblinear"
-        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
     elif penalty == "l2":
         solver = "saga" if multi_class else "lbfgs"
-        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
     else:
         solver = "saga" if multi_class else "lbfgs"
-        model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+        model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
     
     # Évaluer avec validation croisée
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring).mean()
+    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
     return score
 
 def objective(trial, task="Classification", model_type="Random Forest"):
@@ -442,9 +445,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
                 min_samples_split=min_samples_split,
                 min_samples_leaf=min_samples_leaf,
                 max_features=max_features,
-                bootstrap=bootstrap,
-                random_state=42
-            )
+                bootstrap=bootstrap)
         else:
             model = RandomForestRegressor(
                 n_estimators=n_estimators,
@@ -452,9 +453,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
                 min_samples_split=min_samples_split,
                 min_samples_leaf=min_samples_leaf,
                 max_features=max_features,
-                bootstrap=bootstrap,
-                random_state=42
-            )
+                bootstrap=bootstrap)
     
     elif model_type == "KNN":
         # Définition des hyperparamètres pour KNN
@@ -477,17 +476,17 @@ def objective(trial, task="Classification", model_type="Random Forest"):
     
     elif model_type == "SVM":
         # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 1e-2, 1e2, log=True)
+        C = trial.suggest_float("C", 0.01, 20, log=True)
         kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
         degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
         gamma = trial.suggest_categorical("gamma", ["scale", "auto"])
         
         if task == "Classification":
-            model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma, random_state=42)
+            model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
         else:
             model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma)
     
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring).mean()
+    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
     return score
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
@@ -500,11 +499,11 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         if best_params["model"] == "linear":
             best_model = LinearRegression()
         elif best_params["model"] == "ridge":
-            best_model = Ridge(alpha=best_params["alpha"], random_state=42)
+            best_model = Ridge(alpha=best_params["alpha"])
         elif best_params["model"] == "lasso":
-            best_model = Lasso(alpha=best_params["alpha"], random_state=42)
+            best_model = Lasso(alpha=best_params["alpha"])
         elif best_params["model"] == "elasticnet":
-            best_model = ElasticNet(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"], random_state=42)
+            best_model = ElasticNet(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"])
 
     elif model_choosen == "Logistic Regression":
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
@@ -517,16 +516,16 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         
         if penalty == "elasticnet":
             l1_ratio = best_params["l1_ratio"]
-            best_model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1, random_state=42)
+            best_model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
         elif penalty == "l1":
             solver = "saga" if multi_class else "liblinear"
-            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
         elif penalty == "l2":
             solver = "saga" if multi_class else "lbfgs"
-            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
         else:
             solver = "saga" if multi_class else "lbfgs"
-            best_model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
+            best_model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
 
     elif model_choosen == "Random Forest":
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
@@ -548,9 +547,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
                 min_samples_split=min_samples_split,
                 min_samples_leaf=min_samples_leaf,
                 max_features=max_features,
-                bootstrap=bootstrap,
-                random_state=42
-            )
+                bootstrap=bootstrap)
         else:
             best_model = RandomForestClassifier(
                 n_estimators=n_estimators,
@@ -558,9 +555,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
                 min_samples_split=min_samples_split,
                 min_samples_leaf=min_samples_leaf,
                 max_features=max_features,
-                bootstrap=bootstrap,
-                random_state=42
-            )
+                bootstrap=bootstrap)
     elif model_choosen == "KNN":
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
@@ -602,9 +597,13 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         if task == "Regression":
             best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma)
         else:
-            best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma, random_state=42)    
+            best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)    
         
     return best_model, best_params, best_value
+
+def save_model(model, model_name):
+    with open(f"{model_name}.pkl", "wb") as f:
+        pickle.dump(model, f)
 
 # python -m streamlit run src/app/_main_.py
 
@@ -619,7 +618,7 @@ st.write(
 df = None
 uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
 wrang = st.checkbox("La base de données nécessite un traitement")
-wrang_finished = False
+valid_mod=False
 
 if uploaded_file is not None:
     byte_data = uploaded_file.read()
@@ -645,6 +644,7 @@ if df is not None:
         
         target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list())
         pb = False
+        wrang_finished = False
         
         st.sidebar.subheader("Mise à l'échelle des variables numériques")
         
@@ -732,8 +732,9 @@ if df is not None:
         st.sidebar.subheader("Transformation des données")
         
         # Transformation des variables (Box-Cox, Yeo-Johnson, Log, Sqrt)
-        transform_data = st.sidebar.checkbox("Transformer les variables indivduellement", value=False)
-        if transform_data and (not scale_all_data or scaling_vars is None):
+        if not scale_all_data:
+            apply_transformation = st.sidebar.checkbox("Transformer les variables indivduellement", value=False)
+        if apply_transformation and not scale_all_data:
             # Déterminer les variables strcitement positives
             strictly_positive_vars = df_num.columns[(df_num > 0).all()].to_list()
             # Déterminer les variables positives ou nulles
@@ -819,7 +820,7 @@ if df is not None:
             df_scaled = scale_data(df_imputed, list_standard=list_standard, list_minmax=list_minmax, list_robust=list_robust, list_quantile=list_quantile)
 
         # Appliquer les transformations individuelles
-        if not scale_all_data:
+        if apply_transformation and not scale_all_data:
             df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
         
         # Application de l'ACP en fonction du choix de l'utilisateur
@@ -894,6 +895,10 @@ if df is not None:
 
         # Définition de la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
+        
+        # Division des données
+        test_size = st.sidebar.slider("Proportion des données utilisées pour la validation des modèles (en %)", min_value=50, max_value=90, value=75)
+        test_size=test_size/100
         
         st.sidebar.subheader("Choix des modèles")
 
@@ -976,3 +981,210 @@ if df is not None:
                 min_value=2, max_value=20,
                 value=7, step=1,
                 disabled=use_loocv)
+            
+        # Demander le temps disponible
+        time_avail= st.sidebar.slider("Voulez vous prendre plus de temps pour améliorer les résultats",
+                                             min_value=1,
+                                             max_value=3,
+                                             value=2,
+                                             format="%d",
+                                             help="1: Non | 2: Oui mais pas trop | 3: Oui")
+        
+        if time_avail==1:
+            trial=33
+            num_rounds=50
+        elif time_avail==2:
+            trial=66
+            num_rounds=100
+        else:
+            trial=100
+            num_rounds=150
+            
+        # Valider les choix
+        valid_mod = st.sidebar.button("Valider les choix de modélisation")
+        
+if valid_mod:
+    # Effectuer la modélisation
+    
+    # 1. Division des données
+    X = df.drop(columns=target)
+    y = df[target]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, shuffle=True)
+
+    # 2. Choisir le meilleur modèle
+    results = []
+    for model in models:  
+        # Déterminer chaque modèle à optimiser
+        best_model, best_params, best_value = optimize_model(model_choosen=model,
+                                                            task=task,
+                                                            X_train=X_train,
+                                                            y_train=y_train,
+                                                            cv=cv,
+                                                            scoring=scoring_comp,
+                                                            multi_class=multi_class,
+                                                            n_trials=trial,
+                                                            n_jobs=-1)
+        
+        # Ajouter les résultats à la liste
+        results.append({
+            'Model': str(model),
+            'Best Score': best_value,
+            'Best Model': best_model})
+
+    # Créer un DataFrame à partir des résultats
+    df_train = pd.DataFrame(results)
+
+    if task == "Regression":
+        if scoring_comp == "r2":
+            df_train['Best Score'] = df_train['Best Score'].round(2)
+        else:
+            df_train['Best Score'] = -df_train['Best Score'].round(3)
+    else:
+        df_train['Best Score'] = (df_train['Best Score']*100).round(2)
+        
+    df_train = df_train.set_index(df_train['Model'])
+    del df_train['Model']
+
+    # Afficher les résultats de la comparaison
+    st.subheader("Comparaison et optimisation des modèles")   
+    st.dataframe(df_train)
+    st.session_state.df_train = df_train
+    
+    # 7. Evaluer les meilleurs modèles
+    list_models = df_train['Best Model'].tolist()
+
+    list_score = []
+    for model in list_models:  # Utilise les vrais objets modèles
+        scores = cross_validate(model, X, y, cv=cv, scoring=scoring_eval, n_jobs=-1)
+        mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
+        std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
+
+        list_score.append({
+            'Best Model': str(model),  # Affichage du nom seulement
+            'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
+            'Std Scores': std_scores
+        })
+
+    df_score = pd.DataFrame(list_score)
+    
+    # Inverser les dictionnaires des métriques
+    inv_metrics_regression = {v: k for k, v in metrics_regression.items()}
+    inv_metrics_classification = {v: k for k, v in metrics_classification.items()}
+    inv_metrics = inv_metrics_classification if task == "Classification" else inv_metrics_regression
+
+    for metric in scoring_eval:
+        df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
+        df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
+        
+    # Renommage des colonnes pour des noms plus lisibles
+    for metric in scoring_eval:
+        clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
+        df_score.rename(columns={
+            f"Mean {metric}": f"Mean - {clean_metric}",
+            f"Std {metric}": f"Std - {clean_metric}"
+        }, inplace=True)
+
+    # Derniers traitement
+    df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
+    df_score.index = df_train.index
+    st.subheader("Validation des modèles")
+    st.dataframe(df_score)
+    st.session_state.df_score = df_score
+    
+    # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion
+    
+    # Vérifier si les modèles sont instanciés ou juste des classes    
+    bias_variance_results = []
+    df_score['Best Model'] = df_score['Best Model'].apply(lambda x: eval(x))
+    for model in df_score['Best Model']:
+        
+        if task == "Regression":
+            loss='mse'
+        else:
+            loss='0-1_loss'
+            
+        expected_loss, bias, var = bias_variance_decomp(
+            model,
+            X_train.values, y_train.values,
+            X_test.values, y_test.values,
+            loss=loss, num_rounds=50,
+            random_seed=123)
+
+        if task == 'Classification':
+            bias_variance_results.append({
+                "Average 0-1 Loss": round(expected_loss, 3),
+                "Bias²": round(bias, 3),
+                "Bias": round(np.sqrt(bias), 3),
+                "Variance": round(var, 3)})
+        else:
+            bias_variance_results.append({
+                "Average Squared Loss": round(expected_loss, 3),
+                "Bias²": round(bias, 3),
+                "Bias": round(np.sqrt(bias), 3),
+                "Variance": round(var, 3)})        
+        
+    # Création du DataFrame
+    df_bias_variance = pd.DataFrame(bias_variance_results)
+    df_bias_variance.index = df_train.index
+
+    # Affichage dans Streamlit
+    st.subheader("Etude Bias-Variance")
+    st.dataframe(df_bias_variance)
+    st.session_state.df_bias_variance = df_bias_variance
+
+    st.subheader(f"Bilan des Erreurs de Classification")
+    # Matrices de confusion
+    st.session_state.figures = {}
+    if task == 'Classification':
+        for index, row in df_score.iterrows():
+            model = row['Best Model']
+            y_pred = model.predict(X_test)
+            cm = confusion_matrix(y_test, y_pred)
+            
+            fig, ax = plt.subplots(figsize=(3, 2))  # Taille du graphique
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                        xticklabels=[f"Classe {i}" for i in range(cm.shape[1])] if multi_class else ["Classe 0", "Classe 1"],
+                        yticklabels=[f"Classe {i}" for i in range(cm.shape[0])] if multi_class else ["Classe 0", "Classe 1"],
+                        annot_kws={"size": 5},
+                        cbar=False)  # Désactiver la barre de couleur si tu veux
+
+            # Ajuster la taille des labels
+            ax.set_xticklabels(ax.get_xticklabels(), fontsize=5)  # Taille des labels sur l'axe X
+            ax.set_yticklabels(ax.get_yticklabels(), fontsize=5)  # Taille des labels sur l'axe Y
+            
+            plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
+            plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
+            plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
+
+            st.session_state.figures[index] = fig
+            st.pyplot(fig)
+            plt.close(fig)  # Ferme la figure pour libérer de la mémoire
+    
+    st.session_state.models = {}        
+    for index, row in df_score.iterrows():
+        model_name = index  # Utiliser l'index pour le nom du modèle
+        best_model = row['Best Model']  # L'instance du modèle (e.g., LogisticRegression())
+        
+        # Sauvegarder chaque modèle sous forme de fichier .pkl dans st.session_state
+        st.session_state.models[model_name] = best_model
+        
+        # Afficher un bouton pour chaque modèle
+        if st.button(f"Download {model_name}"):
+            # Sauvegarder le modèle en fichier (pickle)
+            with open(f"{model_name}.pkl", "wb") as f:
+                pickle.dump(best_model, f)
+            
+            # Créer un bouton de téléchargement pour le modèle
+            with open(f"{model_name}.pkl", "rb") as f:
+                st.download_button(
+                    label=f"Download {model_name}",
+                    data=f,
+                    file_name=f"{model_name}.pkl",
+                    mime="application/octet-stream"
+                )
+                
+    # Afficher de nouveau les résultats
+    st.dataframe(st.session_state.df_train)
+    
+    st.dataframe(st.session_state.df_score)
+ 
