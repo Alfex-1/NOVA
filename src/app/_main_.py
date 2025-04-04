@@ -673,7 +673,6 @@ st.write(
 )
 
 # Chargement des données
-logo = Image.open("/assets/logo_nova.png")
 df = None
 uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
 wrang = st.checkbox("La base de données nécessite un traitement")
@@ -699,7 +698,7 @@ if uploaded_file is not None:
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
     if wrang is True:
-        st.sidebar.image(logo, width=150)
+        st.sidebar.image(Image.open("./assets/logo_nova.png"), width=150)
             
         st.sidebar.title("Paramètres du traitement des données")
         
