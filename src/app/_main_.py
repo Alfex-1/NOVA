@@ -697,6 +697,14 @@ if uploaded_file is not None:
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
+    st.sidebar.markdown("""
+        <style>
+        .sidebar .sidebar-content {
+            display: flex;
+            justify-content: center;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     st.sidebar.image(Image.open("logo_nova.png"), width=200)
     
     if wrang is True:            
