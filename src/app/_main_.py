@@ -26,6 +26,7 @@ from sklearn.metrics import confusion_matrix
 from io import BytesIO
 import io
 import streamlit as st
+from PIL import Image
 
 
 def correlation_missing_values(df: pd.DataFrame):
@@ -672,6 +673,7 @@ st.write(
 )
 
 # Chargement des données
+logo = Image.open("assets/nova_logo.png")
 df = None
 uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
 wrang = st.checkbox("La base de données nécessite un traitement")
@@ -697,6 +699,16 @@ if uploaded_file is not None:
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
     if wrang is True:
+        with st.sidebar:
+            st.markdown(
+                """
+                <div style="text-align: center; margin-bottom: 10px;">
+                    <img src="data:image/png;base64,%s" width="150">
+                </div>
+                """ % (base64.b64encode(logo.tobytes()).decode("utf-8")),
+                unsafe_allow_html=True
+            )
+            
         st.sidebar.title("Paramètres du traitement des données")
         
         target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list())
