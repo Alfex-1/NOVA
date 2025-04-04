@@ -397,7 +397,7 @@ def objective_linear(trial):
         model = LinearRegression()  # Pas d'hyperparamètre à tuner
     else:
         alpha = trial.suggest_float("alpha", 1e-3, 10.001, step=0.01)
-        alpha = round(alpha, 2)
+        alpha = round(alpha, 3)
         
         if model_type == "elasticnet":
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
@@ -415,7 +415,7 @@ def objective_linear(trial):
 def objective_logistic(trial, multi_class=False):
     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
     C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
-    C = round(C, 2)
+    C = round(C, 3)
     
     if penalty == "elasticnet":
         l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
