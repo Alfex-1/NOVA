@@ -697,9 +697,9 @@ if uploaded_file is not None:
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
-    if wrang is True:
-        st.sidebar.image(Image.open("./assets/logo_nova.png"), width=150)
-            
+    st.sidebar.image(Image.open("logo_nova.png"))
+    
+    if wrang is True:            
         st.sidebar.title("Paramètres du traitement des données")
         
         target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list())
