@@ -396,7 +396,7 @@ def objective_linear(trial):
     if model_type == "linear":
         model = LinearRegression()  # Pas d'hyperparamètre à tuner
     else:
-        alpha = trial.suggest_float("alpha", 1e-3, 10.01, step=0.01)
+        alpha = trial.suggest_float("alpha", 1e-3, 10.001, step=0.01)
         alpha = round(alpha, 2)
         
         if model_type == "elasticnet":
@@ -414,7 +414,7 @@ def objective_linear(trial):
 
 def objective_logistic(trial, multi_class=False):
     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
-    C = trial.suggest_float("C", 1e-3, 10.01, step=0.01)
+    C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
     C = round(C, 2)
     
     if penalty == "elasticnet":
@@ -502,7 +502,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
     if model_choosen == "Linear Regression":
         study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(objective_linear, n_trials=n_trials, n_jobs=n_jobs)
+        study.optimize(objective_linear, n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -517,7 +517,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
 
     elif model_choosen == "Logistic Regression":
         study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(lambda trial: objective_logistic(trial, multi_class=multi_class), n_trials=n_trials, n_jobs=n_jobs)
+        study.optimize(lambda trial: objective_logistic(trial, multi_class=multi_class), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -539,7 +539,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
 
     elif model_choosen == "Random Forest":
         study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -568,7 +568,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
                 bootstrap=bootstrap)
     elif model_choosen == "KNN":
         study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -593,7 +593,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
 
     elif model_choosen == "SVM":
         study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=100)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -654,7 +654,7 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
 
-st.title("✨ NOVA : Simplifying Data Processing & Modeling")
+st.title("✨ NOVA : Numerical Optimization & Validation Assistant")
 st.subheader("Votre assistant pour le traitement des données et la modélisation, sans sacrifier la flexibilité.")
 
 st.write(
