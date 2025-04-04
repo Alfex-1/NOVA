@@ -673,7 +673,7 @@ st.write(
 )
 
 # Chargement des données
-logo = Image.open("assets/logo_nova.png")
+logo = Image.open("/assets/logo_nova.png")
 df = None
 uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
 wrang = st.checkbox("La base de données nécessite un traitement")
