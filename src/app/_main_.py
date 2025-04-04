@@ -17,7 +17,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 import optuna
-from mlxtend.evaluate import bias_variance_decomp
+# from mlxtend.evaluate import bias_variance_decomp
 from sklearn.metrics import confusion_matrix
 import streamlit as st
 from io import BytesIO
@@ -26,6 +26,7 @@ import plotly.express as px
 from scipy.stats.mstats import winsorize
 from scipy import stats
 import pickle
+import os
 
 def correlation_missing_values(df: pd.DataFrame):
     """
@@ -393,10 +394,10 @@ def objective_linear(trial):
     if model_type == "linear":
         model = LinearRegression()  # Pas d'hyperparamètre à tuner
     else:
-        alpha = trial.suggest_float("alpha", 1e-3, 10, log=True)
+        alpha = trial.suggest_float("alpha", 1e-3, 10.001, step=0.01)
         
         if model_type == "elasticnet":
-            l1_ratio = trial.suggest_float("l1_ratio", 0, 1)
+            l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
         elif model_type == "lasso":
             model = Lasso(alpha=alpha)
@@ -409,10 +410,10 @@ def objective_linear(trial):
 
 def objective_logistic(trial, multi_class=False):
     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
-    C = trial.suggest_float("C", 1e-3, 10, log=True)
+    C = trial.suggest_float("C", 1e-3, 10, step=0.01)
     
     if penalty == "elasticnet":
-        l1_ratio = trial.suggest_float("l1_ratio", 0, 1)
+        l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
         model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
     elif penalty == "l1":
         solver = "saga" if multi_class else "liblinear"
@@ -476,7 +477,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
     
     elif model_type == "SVM":
         # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 0.01, 20, log=True)
+        C = trial.suggest_float("C", 0.01, 20, step=0.01)
         kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
         degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
         gamma = trial.suggest_categorical("gamma", ["scale", "auto"])
@@ -484,7 +485,9 @@ def objective(trial, task="Classification", model_type="Random Forest"):
         if task == "Classification":
             model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
         else:
-            model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma)
+            epsilon = trial.suggest_float("epsilon", 0.01, 1.0, step=0.01)
+            epsilon = round(epsilon,2)
+            model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
     
     score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
     return score
@@ -595,15 +598,51 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         
         # Créer le modèle selon la tâche
         if task == "Regression":
-            best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma)
+            epsilon = best_params["epsilon"]
+            best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
         else:
             best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)    
         
     return best_model, best_params, best_value
 
-def save_model(model, model_name):
-    with open(f"{model_name}.pkl", "wb") as f:
-        pickle.dump(model, f)
+def _draw_bootstrap_sample(rng, X, y):
+    sample_indices = np.arange(X.shape[0])
+    bootstrap_indices = rng.choice(sample_indices, size=sample_indices.shape[0], replace=True)
+    return X[bootstrap_indices], y[bootstrap_indices]
+
+def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_loss", num_rounds=200, random_seed=None, **fit_params):
+    if loss not in ["0-1_loss", "mse"]:
+        raise NotImplementedError("Loss must be '0-1_loss' or 'mse'")
+
+    rng = np.random.RandomState(random_seed)
+    all_pred = np.zeros((num_rounds, y_test.shape[0]), dtype=np.float64 if loss == "mse" else np.int64)
+
+    for i in range(num_rounds):
+        X_boot, y_boot = _draw_bootstrap_sample(rng, X_train, y_train)
+        pred = estimator.fit(X_boot, y_boot, **fit_params).predict(X_test)
+        all_pred[i] = pred
+
+    main_predictions = np.apply_along_axis(np.mean if loss == "mse" else lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
+    
+    if loss == "0-1_loss":
+        main_predictions = np.apply_along_axis(lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
+        avg_expected_loss = np.apply_along_axis(lambda x: (x != y_test).mean(), axis=1, arr=all_pred).mean()
+        
+        avg_bias = np.sum(main_predictions != y_test) / y_test.size
+        var = np.zeros(pred.shape)
+        for pred in all_pred:
+            var += (pred != main_predictions).astype(np.int_)
+        var /= num_rounds
+
+        avg_var = var.sum() / y_test.shape[0]
+    else:
+        avg_expected_loss = np.apply_along_axis(lambda x: ((x - y_test) ** 2).mean(), axis=1, arr=all_pred).mean()
+        main_predictions = np.mean(all_pred, axis=0)
+
+        avg_bias = np.sum((main_predictions - y_test)) / y_test.size
+        avg_var = np.sum((main_predictions - all_pred) ** 2) / all_pred.size
+    
+    return avg_expected_loss, avg_bias, avg_var
 
 # python -m streamlit run src/app/_main_.py
 
@@ -627,7 +666,7 @@ if uploaded_file is not None:
     # Lecture optimisée avec sélection du premier séparateur valide
     for sep in separators:
         try:
-            df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=5)  # Charge un échantillon
+            df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)  # Charge un échantillon
             if df.shape[1] > 1:
                 df = pd.read_csv(BytesIO(byte_data), sep=sep)  # Recharge tout avec le bon séparateur
                 break
@@ -733,8 +772,6 @@ if df is not None:
         
         # Transformation des variables (Box-Cox, Yeo-Johnson, Log, Sqrt)
         if not scale_all_data:
-            apply_transformation = st.sidebar.checkbox("Transformer les variables indivduellement", value=False)
-        if apply_transformation and not scale_all_data:
             # Déterminer les variables strcitement positives
             strictly_positive_vars = df_num.columns[(df_num > 0).all()].to_list()
             # Déterminer les variables positives ou nulles
@@ -820,7 +857,7 @@ if df is not None:
             df_scaled = scale_data(df_imputed, list_standard=list_standard, list_minmax=list_minmax, list_robust=list_robust, list_quantile=list_quantile)
 
         # Appliquer les transformations individuelles
-        if apply_transformation and not scale_all_data:
+        if not scale_all_data:
             df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
         
         # Application de l'ACP en fonction du choix de l'utilisateur
@@ -982,30 +1019,45 @@ if df is not None:
                 value=7, step=1,
                 disabled=use_loocv)
             
-        # Demander le temps disponible
-        time_avail= st.sidebar.slider("Voulez vous prendre plus de temps pour améliorer les résultats",
-                                             min_value=1,
-                                             max_value=3,
-                                             value=2,
-                                             format="%d",
-                                             help="1: Non | 2: Oui mais pas trop | 3: Oui")
+        # Demander le temps disponible selon les choix de l'utilisateur
+        time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
         
-        if time_avail==1:
-            trial=33
-            num_rounds=50
-        elif time_avail==2:
-            trial=66
-            num_rounds=100
+        complexity_weights = {
+            "Linear Regression": 1,
+            "KNN": 1,
+            "Logistic Regression": 1.5,
+            "Random Forest": 4,
+            "SVM": 3.5}
+        
+        # Calcul des complexités
+        data_factor = np.log1p(df.shape[0] * df.shape[1])
+        total_complexity = sum(complexity_weights[m] * data_factor for m in models)
+        
+        # Ajustement de trial en fonction de la complexité
+        if total_complexity <= 10:
+            trial = 100
+        elif total_complexity < 30 and total_complexity > 10:
+            trial = 50
         else:
-            trial=100
-            num_rounds=150
+            trial = 25
+        
+        trial = max(5, min(100, int(50000 / total_complexity)))
+        
+        if time_sup:
+            trial *= 1.25
+            trail = round(trial,0).astype(int)
+        
+        num_rounds = round(trial * 1.5,0).astype(int)
             
+        # Dossier
+        base_dir = st.sidebar.text_input("Entrez le chemin du dossier qui contiendra les modèles enregistrés", help="Exemple : C:\\Users\\Documents")
+        
         # Valider les choix
         valid_mod = st.sidebar.button("Valider les choix de modélisation")
         
 if valid_mod:
     # Effectuer la modélisation
-    
+
     # 1. Division des données
     X = df.drop(columns=target)
     y = df[target]
@@ -1015,7 +1067,7 @@ if valid_mod:
     results = []
     for model in models:  
         # Déterminer chaque modèle à optimiser
-        best_model, best_params, best_value = optimize_model(model_choosen=model,
+        best_model, best_params, _ = optimize_model(model_choosen=model,
                                                             task=task,
                                                             X_train=X_train,
                                                             y_train=y_train,
@@ -1028,27 +1080,18 @@ if valid_mod:
         # Ajouter les résultats à la liste
         results.append({
             'Model': str(model),
-            'Best Score': best_value,
             'Best Model': best_model})
 
     # Créer un DataFrame à partir des résultats
-    df_train = pd.DataFrame(results)
-
-    if task == "Regression":
-        if scoring_comp == "r2":
-            df_train['Best Score'] = df_train['Best Score'].round(2)
-        else:
-            df_train['Best Score'] = -df_train['Best Score'].round(3)
-    else:
-        df_train['Best Score'] = (df_train['Best Score']*100).round(2)
-        
-    df_train = df_train.set_index(df_train['Model'])
-    del df_train['Model']
+    df_train = pd.DataFrame(results)        
+    df_train = df_train.set_index(df_train['Model']).drop(columns='Model')
 
     # Afficher les résultats de la comparaison
-    st.subheader("Comparaison et optimisation des modèles")   
-    st.dataframe(df_train)
-    st.session_state.df_train = df_train
+    st.subheader("Comparaison et optimisation des modèles")
+    df_train2 = df_train.copy()
+    df_train2["Best Model"] = df_train2["Best Model"].astype(str)   
+    st.dataframe(df_train2)
+    st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
     
     # 7. Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
@@ -1087,9 +1130,9 @@ if valid_mod:
     # Derniers traitement
     df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
     df_score.index = df_train.index
+    df_score2 = df_score.drop(columns='Best Model')
     st.subheader("Validation des modèles")
-    st.dataframe(df_score)
-    st.session_state.df_score = df_score
+    st.dataframe(df_score2)
     
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion
     
@@ -1097,30 +1140,24 @@ if valid_mod:
     bias_variance_results = []
     df_score['Best Model'] = df_score['Best Model'].apply(lambda x: eval(x))
     for model in df_score['Best Model']:
-        
-        if task == "Regression":
-            loss='mse'
-        else:
-            loss='0-1_loss'
             
         expected_loss, bias, var = bias_variance_decomp(
             model,
             X_train.values, y_train.values,
             X_test.values, y_test.values,
-            loss=loss, num_rounds=50,
+            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=50,
             random_seed=123)
 
         if task == 'Classification':
             bias_variance_results.append({
-                "Average 0-1 Loss": round(expected_loss, 3),
-                "Bias²": round(bias, 3),
-                "Bias": round(np.sqrt(bias), 3),
+                # "Average 0-1 Loss": round(expected_loss, 3),
+                "Bias": round(bias, 3),
                 "Variance": round(var, 3)})
         else:
             bias_variance_results.append({
-                "Average Squared Loss": round(expected_loss, 3),
-                "Bias²": round(bias, 3),
-                "Bias": round(np.sqrt(bias), 3),
+                # "Average Squared Loss": round(expected_loss, 3),
+                "Bias": round(bias, 3),
+                "Bias²": round(bias**2, 3),
                 "Variance": round(var, 3)})        
         
     # Création du DataFrame
@@ -1130,12 +1167,10 @@ if valid_mod:
     # Affichage dans Streamlit
     st.subheader("Etude Bias-Variance")
     st.dataframe(df_bias_variance)
-    st.session_state.df_bias_variance = df_bias_variance
 
-    st.subheader(f"Bilan des Erreurs de Classification")
     # Matrices de confusion
-    st.session_state.figures = {}
     if task == 'Classification':
+        st.subheader(f"Bilan des Erreurs de Classification")
         for index, row in df_score.iterrows():
             model = row['Best Model']
             y_pred = model.predict(X_test)
@@ -1155,36 +1190,31 @@ if valid_mod:
             plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
             plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
             plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
-
-            st.session_state.figures[index] = fig
-            st.pyplot(fig)
-            plt.close(fig)  # Ferme la figure pour libérer de la mémoire
-    
-    st.session_state.models = {}        
-    for index, row in df_score.iterrows():
-        model_name = index  # Utiliser l'index pour le nom du modèle
-        best_model = row['Best Model']  # L'instance du modèle (e.g., LogisticRegression())
-        
-        # Sauvegarder chaque modèle sous forme de fichier .pkl dans st.session_state
-        st.session_state.models[model_name] = best_model
-        
-        # Afficher un bouton pour chaque modèle
-        if st.button(f"Download {model_name}"):
-            # Sauvegarder le modèle en fichier (pickle)
-            with open(f"{model_name}.pkl", "wb") as f:
-                pickle.dump(best_model, f)
             
-            # Créer un bouton de téléchargement pour le modèle
-            with open(f"{model_name}.pkl", "rb") as f:
-                st.download_button(
-                    label=f"Download {model_name}",
-                    data=f,
-                    file_name=f"{model_name}.pkl",
-                    mime="application/octet-stream"
-                )
-                
-    # Afficher de nouveau les résultats
-    st.dataframe(st.session_state.df_train)
+            st.pyplot(fig)
+            plt.close(fig)
     
-    st.dataframe(st.session_state.df_score)
+    # Vérifier si le chemin existe
+    if os.path.exists(base_dir):
+        save_dir = os.path.join(base_dir, "saved_models")
+        
+        # Créer le dossier s'il n'existe pas
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Exemple de dataframe df_score avec les modèles
+        for index, row in df_score.iterrows():
+            model_name = index  # Nom du modèle
+            best_model = row['Best Model']  # L'instance du modèle
+            
+            # Chemin de sauvegarde pour chaque modèle
+            file_path = os.path.join(save_dir, f"{model_name}.pkl")
+            
+            # Sauvegarde du modèle dans un fichier .pkl
+            with open(file_path, "wb") as f:
+                pickle.dump(best_model, f)
+        
+        # Afficher un message de succès
+        st.success(f"✅ Tous les modèles ont été enregistrés dans le dossier `{save_dir}`.")
+    else:
+        st.error("Le chemin spécifié n'existe pas ou n'est pas valide.")
  
