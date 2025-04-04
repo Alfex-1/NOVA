@@ -4,31 +4,29 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
+import plotly.express as px
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
+from scipy.stats.mstats import winsorize
+from scipy import stats
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
-from sklearn.compose import ColumnTransformer
-from sklearn.decomposition import PCA
-from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
+from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
-# from mlxtend.evaluate import bias_variance_decomp
 from sklearn.metrics import confusion_matrix
-import streamlit as st
 from io import BytesIO
 import io
-import plotly.express as px
-from scipy.stats.mstats import winsorize
-from scipy import stats
-import pickle
-import os
+import streamlit as st
+
 
 def correlation_missing_values(df: pd.DataFrame):
     """
