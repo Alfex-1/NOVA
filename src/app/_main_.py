@@ -938,29 +938,6 @@ if df is not None:
             df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
 
-            # Demander à l'utilisateur où il veut enregistrer le fichier (chemin du dossier)
-            base_dir = st.sidebar.text_input("Entrez le chemin du dossier pour le téléchargement", help="Exemple : C:\\Users\\Documents")
-
-            # Normaliser le chemin pour éviter les problèmes
-            if base_dir:
-                base_dir = os.path.normpath(base_dir)  # Normaliser le chemin pour éviter les erreurs
-
-                # Vérifier si le répertoire existe, sinon le créer
-                if not os.path.exists(base_dir):
-                    try:
-                        os.makedirs(base_dir)
-                    except Exception as e:
-                        st.error(f"Erreur lors de la création du répertoire : {e}")
-
-                # Définir le chemin du fichier
-                file_path = os.path.join(base_dir, "data.csv")
-                
-                # Enregistrer le fichier dans le répertoire spécifié
-                with open(file_path, 'w') as f:
-                    f.write(csv_data)
-                
-                st.write(f"Fichier enregistré sous : {file_path}")
-
             # Afficher le bouton pour télécharger le fichier
             st.download_button(
                 label="📥 Télécharger les données traitées",
