@@ -17,6 +17,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 import optuna
+from optuna.samplers import TPESampler
+from optuna.pruners import HyperbandPruner
 # from mlxtend.evaluate import bias_variance_decomp
 from sklearn.metrics import confusion_matrix
 import streamlit as st
@@ -394,10 +396,12 @@ def objective_linear(trial):
     if model_type == "linear":
         model = LinearRegression()  # Pas d'hyperparamètre à tuner
     else:
-        alpha = trial.suggest_float("alpha", 1e-3, 10.001, step=0.01)
+        alpha = trial.suggest_float("alpha", 1e-3, 10.01, step=0.01)
+        alpha = round(alpha, 2)
         
         if model_type == "elasticnet":
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
+            l1_ratio = round(l1_ratio, 2)
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
         elif model_type == "lasso":
             model = Lasso(alpha=alpha)
@@ -410,10 +414,12 @@ def objective_linear(trial):
 
 def objective_logistic(trial, multi_class=False):
     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
-    C = trial.suggest_float("C", 1e-3, 10, step=0.01)
+    C = trial.suggest_float("C", 1e-3, 10.01, step=0.01)
+    C = round(C, 2)
     
     if penalty == "elasticnet":
         l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
+        l1_ratio = round(l1_ratio, 2)
         model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
     elif penalty == "l1":
         solver = "saga" if multi_class else "liblinear"
@@ -477,7 +483,8 @@ def objective(trial, task="Classification", model_type="Random Forest"):
     
     elif model_type == "SVM":
         # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 0.01, 20, step=0.01)
+        C = trial.suggest_float("C", 0.01, 20.01, step=0.01)
+        C = round(C, 2)
         kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
         degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
         gamma = trial.suggest_categorical("gamma", ["scale", "auto"])
@@ -494,7 +501,7 @@ def objective(trial, task="Classification", model_type="Random Forest"):
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
     if model_choosen == "Linear Regression":
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
+        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(objective_linear, n_trials=n_trials, n_jobs=n_jobs)
         best_params = study.best_params
         best_value = study.best_value
@@ -509,7 +516,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             best_model = ElasticNet(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"])
 
     elif model_choosen == "Logistic Regression":
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
+        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective_logistic(trial, multi_class=multi_class), n_trials=n_trials, n_jobs=n_jobs)
         best_params = study.best_params
         best_value = study.best_value
@@ -531,7 +538,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             best_model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
 
     elif model_choosen == "Random Forest":
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
+        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
         best_params = study.best_params
         best_value = study.best_value
@@ -560,7 +567,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
                 max_features=max_features,
                 bootstrap=bootstrap)
     elif model_choosen == "KNN":
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
+        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
         best_params = study.best_params
         best_value = study.best_value
@@ -585,7 +592,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             )
 
     elif model_choosen == "SVM":
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler())
+        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs)
         best_params = study.best_params
         best_value = study.best_value
@@ -645,12 +652,25 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
     return avg_expected_loss, avg_bias, avg_var
 
 # python -m streamlit run src/app/_main_.py
+st.set_page_config(page_title="NOVA", layout="wide")
 
-st.title("...")
-st.subheader("...")
+st.title("✨ NOVA : Simplifying Data Processing & Modeling")
+st.subheader("Votre assistant pour le traitement des données et la modélisation, sans sacrifier la flexibilité.")
+
 st.write(
-    ("... "
-     "...")
+    """
+    **NOVA** vous accompagne dans la préparation et l’optimisation de vos modèles de machine learning.  
+    Conçue pour les professionnels qui savent que chaque projet est unique, **NOVA** offre des outils puissants
+    pour la gestion des données et l'ajustement des modèles, tout en laissant l'exploration et la personnalisation à votre charge.
+
+    **Fonctionnalités principales :**
+    - 🔄 **Prétraitement des données** : mise à l’échelle, encodage, gestion des valeurs manquantes, outliers, et transformations adaptées.
+    - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 4 modèles populaires (régression linéaire/logistique, KNN, SVM, Random Forest).
+    - 🏆 **Évaluation des modèles** : validation croisée, analyse biais-variance, et matrice de confusion pour les tâches de classification.
+    
+    **NOVA** permet à chaque utilisateur de bénéficier d’une infrastructure robuste, tout en maintenant une flexibilité totale sur le traitement fondamental des données.
+    Vous contrôlez les choix, nous optimisons les outils.
+    """
 )
 
 # Chargement des données
@@ -748,7 +768,7 @@ if df is not None:
 
             # Vérifier les doublons dans les listes de mise à l'échelle
             duplicates_in_encoding = set([var for var in encoding_vars if encoding_vars.count(var) > 1])
-            if duplicates_in_scaling:
+            if duplicates_in_encoding:
                 pb = True
                 st.sidebar.warning(f"⚠️ Les variables suivantes sont présentes plusieurs fois dans les listes de variables à encoder : {', '.join(duplicates_in_encoding)}")
             
@@ -1022,32 +1042,37 @@ if df is not None:
         # Demander le temps disponible selon les choix de l'utilisateur
         time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
         
+       # Pondération de complexité selon les modèles
         complexity_weights = {
-            "Linear Regression": 1,
-            "KNN": 1,
-            "Logistic Regression": 1.5,
-            "Random Forest": 4,
-            "SVM": 3.5}
+            "Linear Regression": 2,
+            "KNN": 3,
+            "Logistic Regression": 3,
+            "Random Forest": 6,
+            "SVM": 7,
+        }
         
-        # Calcul des complexités
-        data_factor = np.log1p(df.shape[0] * df.shape[1])
-        total_complexity = sum(complexity_weights[m] * data_factor for m in models)
+        # Paramètres de base
+        max_global_trials = 50
+        max_trials_hard_limit = 150
         
-        # Ajustement de trial en fonction de la complexité
-        if total_complexity <= 10:
-            trial = 100
-        elif total_complexity < 30 and total_complexity > 10:
-            trial = 50
-        else:
-            trial = 25
+        # Taille des données
+        n_rows, n_cols = df.shape
+        data_penalty = (n_rows / 1e6) * (n_cols / 5)
+
+        # Complexité totale des modèles
+        model_penalty = sum(complexity_weights.get(m, 3) for m in models)
         
-        trial = max(5, min(100, int(50000 / total_complexity)))
-        
+        # Calcul du budget brut
+        raw_score = data_penalty * model_penalty
+        # Inversion du score pour définir le nombre d'essais
+        trial = max_global_trials / (1 + raw_score)
+
+        # Ajout de la préférence utilisateur
         if time_sup:
-            trial *= 1.25
-            trail = int(round(trial,0))
+            trial = min(150, int(round(trial * 1.5)))
+        trial = int(min(max_trials_hard_limit, max(5, round(trial))))
         
-        num_rounds = int(round(trial * 1.5,0))
+        num_rounds = int(round(trial*1.25))
             
         # Dossier
         base_dir = st.sidebar.text_input("Entrez le chemin du dossier qui contiendra les modèles enregistrés", help="Exemple : C:\\Users\\Documents")
