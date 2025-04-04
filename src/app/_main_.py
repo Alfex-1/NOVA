@@ -25,6 +25,7 @@ from optuna.pruners import HyperbandPruner
 from sklearn.metrics import confusion_matrix
 from io import BytesIO
 import io
+import os
 import streamlit as st
 from PIL import Image
 
@@ -697,14 +698,6 @@ if uploaded_file is not None:
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
-    st.sidebar.markdown("""
-        <style>
-        .sidebar .sidebar-content {
-            display: flex;
-            justify-content: center;
-        }
-        </style>
-    """, unsafe_allow_html=True)
     st.sidebar.image(Image.open("logo_nova.png"), width=200)
     
     if wrang is True:            
@@ -924,6 +917,21 @@ if df is not None:
             df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
 
+            # Demander à l'utilisateur où il veut enregistrer le fichier (chemin du dossier)
+            base_dir = st.sidebar.text_input("Entrez le chemin du dossier pour le téléchargement", help="Exemple : C:\\Users\\Documents")
+
+            # Vérifier si le répertoire existe, sinon le créer
+            if base_dir and not os.path.exists(base_dir):
+                os.makedirs(base_dir)
+
+            # Enregistrer le fichier dans le répertoire spécifié
+            if base_dir:
+                file_path = os.path.join(base_dir, "data.csv")
+                with open(file_path, 'w') as f:
+                    f.write(csv_data)
+                st.write(f"Fichier enregistré sous : {file_path}")
+
+            # Afficher le bouton pour télécharger le fichier
             st.download_button(
                 label="📥 Télécharger les données traitées",
                 data=csv_data,
@@ -931,6 +939,7 @@ if df is not None:
                 mime="text/csv"
             )
 
+            # Afficher l'aperçu des données traitées
             st.write("### Aperçu des données traitées :")
             st.dataframe(df)
         
@@ -963,7 +972,7 @@ if df is not None:
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
         
         # Division des données
-        test_size = st.sidebar.slider("Proportion des données utilisées pour la validation des modèles (en %)", min_value=50, max_value=90, value=75)
+        test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
         test_size=test_size/100
         
         st.sidebar.subheader("Choix des modèles")
@@ -1083,7 +1092,8 @@ if df is not None:
         
         num_rounds = int(round(trial*1.25))
             
-        # Dossier
+        st.sidebar.subheader("Enregistrement des modèles")
+        # Demander à l'utilisateur où il souhaite enregistrer les modèles
         base_dir = st.sidebar.text_input("Entrez le chemin du dossier qui contiendra les modèles enregistrés", help="Exemple : C:\\Users\\Documents")
         
         # Valider les choix
