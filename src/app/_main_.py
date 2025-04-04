@@ -1045,9 +1045,9 @@ if df is not None:
         
         if time_sup:
             trial *= 1.25
-            trail = round(trial,0).astype(int)
+            trail = int(round(trial,0))
         
-        num_rounds = round(trial * 1.5,0).astype(int)
+        num_rounds = int(round(trial * 1.5,0))
             
         # Dossier
         base_dir = st.sidebar.text_input("Entrez le chemin du dossier qui contiendra les modèles enregistrés", help="Exemple : C:\\Users\\Documents")
@@ -1145,7 +1145,7 @@ if valid_mod:
             model,
             X_train.values, y_train.values,
             X_test.values, y_test.values,
-            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=50,
+            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=num_rounds,
             random_seed=123)
 
         if task == 'Classification':
