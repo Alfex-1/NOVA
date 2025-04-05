@@ -60,18 +60,32 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(
-    df: pd.DataFrame, 
-    list_binary: list[str] = None, 
-    list_ordinal: list[str] = None, 
-    list_nominal: list[str] = None, 
-    ordinal_mapping: dict[str, dict] = None
-) -> pd.DataFrame:
+def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict] = None):
+    """
+    Encode les variables catégorielles d'un DataFrame selon leur nature : binaire, ordinale ou nominale.
+
+    - **Binaire** : One-Hot Encoding avec `drop='if_binary'` pour éviter la redondance (1 seule colonne encodée).
+    - **Ordinal** : Mapping manuel si fourni, sinon encodage automatique avec `OrdinalEncoder`.
+    - **Nominal** : One-Hot Encoding complet sans drop.
+
+    Les colonnes non spécifiées sont conservées telles quelles.
+
+    Args:
+        df (pd.DataFrame): Le DataFrame original à transformer.
+        list_binary (list[str], optional): Colonnes à encoder comme binaires via One-Hot. 
+        list_ordinal (list[str], optional): Colonnes à encoder comme ordinales (via mapping ou encodage automatique).
+        list_nominal (list[str], optional): Colonnes à encoder comme nominales (One-Hot complet).
+        ordinal_mapping (dict[str, dict], optional): Dictionnaire définissant l'ordre des modalités pour les variables ordinales.
+            Format : {'colonne': {'mod1': 0, 'mod2': 1, ...}}.
+
+    Returns:
+        pd.DataFrame: DataFrame avec toutes les variables encodées et concaténées, incluant les colonnes numériques non transformées.
+    """
     df_encoded_parts = []
 
     # Binaire → OneHot
     if list_binary:
-        onehot = OneHotEncoder(sparse_output=False, drop=None)
+        onehot = OneHotEncoder(sparse_output=False, drop='if_binary', handle_unknown='ignore')
         binary_encoded = onehot.fit_transform(df[list_binary])
         binary_columns = onehot.get_feature_names_out(list_binary)
         df_encoded_parts.append(pd.DataFrame(binary_encoded, columns=binary_columns, index=df.index))
@@ -754,6 +768,24 @@ if df is not None:
         # Déterminer si la variable cible doit être incluse dans la mise à l'échelle
         use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False)
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
+        
+        description = []
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                var_type = 'Numérique'
+                n_modalites = np.nan
+            else:
+                var_type = 'Catégorielle'
+                n_modalites = df[col].nunique()
+            
+            description.append({
+                'Variable': col,
+                'Type': var_type,
+                'Nb modalités': n_modalites
+            })
+            
+        # Afficher le descriptif de la table
+        st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
         
         if drop_dupli:
             df.drop_duplicates(inplace=True)
