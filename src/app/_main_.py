@@ -60,7 +60,49 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
+def encode_data(
+    df: pd.DataFrame, 
+    list_binary: list[str] = None, 
+    list_ordinal: list[str] = None, 
+    list_nominal: list[str] = None, 
+    ordinal_mapping: dict[str, dict] = None
+) -> pd.DataFrame:
+    df_encoded_parts = []
+
+    # Binaire → OneHot
+    if list_binary:
+        onehot = OneHotEncoder(sparse_output=False, drop=None)
+        binary_encoded = onehot.fit_transform(df[list_binary])
+        binary_columns = onehot.get_feature_names_out(list_binary)
+        df_encoded_parts.append(pd.DataFrame(binary_encoded, columns=binary_columns, index=df.index))
+
+    # Ordinal → mapping explicite ou OrdinalEncoder
+    if list_ordinal:
+        df_ordinal = pd.DataFrame(index=df.index)
+        for col in list_ordinal:
+            if ordinal_mapping and col in ordinal_mapping:
+                df_ordinal[col] = df[col].map(ordinal_mapping[col])
+            else:
+                encoder = OrdinalEncoder()
+                df_ordinal[col] = encoder.fit_transform(df[[col]])
+        df_encoded_parts.append(df_ordinal)
+
+    # Nominal → OneHot
+    if list_nominal:
+        onehot = OneHotEncoder(sparse_output=False, drop=None)
+        nominal_encoded = onehot.fit_transform(df[list_nominal])
+        nominal_columns = onehot.get_feature_names_out(list_nominal)
+        df_encoded_parts.append(pd.DataFrame(nominal_encoded, columns=nominal_columns, index=df.index))
+
+    # Reste des colonnes numériques (non encodées)
+    cols_used = set((list_binary or []) + (list_ordinal or []) + (list_nominal or []))
+    cols_remaining = [col for col in df.columns if col not in cols_used]
+    df_encoded_parts.append(df[cols_remaining])
+
+    return pd.concat(df_encoded_parts, axis=1)
+
+
+def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
     Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
 
@@ -655,7 +697,7 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
 st.set_page_config(page_title="NOVA", layout="wide")
 
 st.title("✨ NOVA : Numerical Optimization & Validation Assistant")
-st.subheader("Votre assistant pour le traitement des données et la modélisation, sans sacrifier la flexibilité.")
+st.subheader("Votre assistant flexible pour le traitement des données et la modélisation.")
 
 st.write(
     """
@@ -916,7 +958,7 @@ if df is not None:
             
             # Visualisation avec Seaborn
             fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'], 
-                  markers=True, title="Méthode du coude pour l'ACP",
+                  markers=True, title="Evolution de la variance expliquée par les composantes principales",
                   labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
                   color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
             fig.update_layout(
@@ -937,6 +979,10 @@ if df is not None:
             csv_buffer = io.StringIO()
             df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
+            
+            # Afficher l'aperçu des données traitées
+            st.write("### Aperçu des données traitées :")
+            st.dataframe(df)
 
             # Afficher le bouton pour télécharger le fichier
             st.download_button(
@@ -945,10 +991,6 @@ if df is not None:
                 file_name="data.csv",
                 mime="text/csv"
             )
-
-            # Afficher l'aperçu des données traitées
-            st.write("### Aperçu des données traitées :")
-            st.dataframe(df)
     
     else:
         # Modélisation
