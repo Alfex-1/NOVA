@@ -1318,8 +1318,8 @@ if valid_mod:
             plt.barh(range(X_train.shape[1]), importances, xerr=std_importances, align="center")
             plt.yticks(range(X_train.shape[1]), X_train.columns)
             plt.xlabel("Importance")
-            plt.title("Importance des features par permutation")
-            plt.show()
+            plt.title("Importance des variables par permutation")
+            st.pyplot(plt)
     
     # Vérifier si le chemin existe
     if os.path.exists(base_dir):
