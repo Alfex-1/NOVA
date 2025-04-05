@@ -1324,9 +1324,10 @@ if valid_mod:
             # Créer le graphique
             plt.figure(figsize=(5, 3))
             plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-            plt.yticks(range(len(sorted_features)), sorted_features)
-            plt.xlabel("Importance")
-            plt.title(f"Importance des variables par permutation - {index}")
+            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=7)
+            plt.xticks(fontsize=7)
+            plt.xlabel("Importance", fontsize=9)
+            plt.title(f"Importance des variables par permutation - {index}", fontsize=10)
             plt.gca().invert_yaxis()
             st.pyplot(plt)
     
