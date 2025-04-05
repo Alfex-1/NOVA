@@ -1153,6 +1153,7 @@ if df is not None:
         trial = int(min(max_trials_hard_limit, max(5, round(trial))))
         
         num_rounds = trial
+        repeats = trial
             
         st.sidebar.subheader("Enregistrement des modèles")
         # Demander à l'utilisateur où il souhaite enregistrer les modèles
@@ -1307,7 +1308,7 @@ if valid_mod:
             model.fit(X_train, y_train)
             
             # Calculer l'importance des features par permutation
-            result = permutation_importance(model, X_test, y_test, n_repeats=30, random_state=42)
+            result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
 
             # Extraire l'importance moyenne des features
             importances = result.importances_mean
@@ -1324,10 +1325,10 @@ if valid_mod:
             # Créer le graphique
             plt.figure(figsize=(5, 3))
             plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=7)
-            plt.xticks(fontsize=7)
-            plt.xlabel("Importance", fontsize=9)
-            plt.title(f"Importance des variables par permutation - {index}", fontsize=10)
+            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=5)
+            plt.xticks(fontsize=5)
+            plt.xlabel("Importance", fontsize=7)
+            plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
             plt.gca().invert_yaxis()
             st.pyplot(plt)
     
