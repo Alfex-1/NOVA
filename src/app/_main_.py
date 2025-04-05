@@ -769,24 +769,6 @@ if df is not None:
         use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False)
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
         
-        description = []
-        for col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                var_type = 'Numérique'
-                n_modalites = np.nan
-            else:
-                var_type = 'Catégorielle'
-                n_modalites = df[col].nunique()
-            
-            description.append({
-                'Variable': col,
-                'Type': var_type,
-                'Nb modalités': n_modalites
-            })
-            
-        # Afficher le descriptif de la table
-        st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
-        
         if drop_dupli:
             df.drop_duplicates(inplace=True)
         
@@ -1004,6 +986,26 @@ if df is not None:
         
         # Finir le traitement
         wrang_finished = True
+        # Afficher le descriptif de la base de données
+        st.write("### Descriptif de la base de données :")
+        st.write("**Nombre d'observations :**", df.shape[0])
+        st.write("**Nombre de variables :**", df.shape[1])
+        if df is not None:
+            description = []
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    var_type = 'Numérique'
+                    n_modalites = np.nan
+                else:
+                    var_type = 'Catégorielle'
+                    n_modalites = df[col].nunique()
+                
+                description.append({
+                    'Variable': col,
+                    'Type': var_type,
+                    'Nb modalités': n_modalites
+                })
+            st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
         
         # Téléchargement du fichier encodé
         if df is not None and wrang_finished and not pb:
