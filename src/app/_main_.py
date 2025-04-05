@@ -1307,18 +1307,27 @@ if valid_mod:
             model.fit(X_train, y_train)
             
             # Calculer l'importance des features par permutation
-            result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
+            result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42)
 
             # Extraire l'importance moyenne des features
             importances = result.importances_mean
             std_importances = result.importances_std
 
-            # Visualiser les importances
+            # Trier les importances par ordre décroissant
+            sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
+
+            # Trier les valeurs d'importance et les noms des features
+            sorted_importances = importances[sorted_idx]
+            sorted_std_importances = std_importances[sorted_idx]
+            sorted_features = X_train.columns[sorted_idx]
+
+            # Créer le graphique
             plt.figure(figsize=(10, 6))
-            plt.barh(range(X_train.shape[1]), importances, xerr=std_importances, align="center")
-            plt.yticks(range(X_train.shape[1]), X_train.columns)
+            plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
+            plt.yticks(range(len(sorted_features)), sorted_features)
             plt.xlabel("Importance")
-            plt.title("Importance des variables par permutation")
+            plt.title("Importance des features par permutation (triée)")
+            plt.gca().invert_yaxis()
             st.pyplot(plt)
     
     # Vérifier si le chemin existe
