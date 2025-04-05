@@ -18,7 +18,7 @@ from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, Log
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+from sklearn.inspection import permutation_importance
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
@@ -1299,6 +1299,27 @@ if valid_mod:
             
             st.pyplot(fig)
             plt.close(fig)
+    
+    # Feature importance
+    st.subheader(f"Importance des variables")
+    for index, row in df_score.iterrows():
+            model = row['Best Model']
+            model.fit(X_train, y_train)
+            
+            # Calculer l'importance des features par permutation
+            result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
+
+            # Extraire l'importance moyenne des features
+            importances = result.importances_mean
+            std_importances = result.importances_std
+
+            # Visualiser les importances
+            plt.figure(figsize=(10, 6))
+            plt.barh(range(X_train.shape[1]), importances, xerr=std_importances, align="center")
+            plt.yticks(range(X_train.shape[1]), X_train.columns)
+            plt.xlabel("Importance")
+            plt.title("Importance des features par permutation")
+            plt.show()
     
     # Vérifier si le chemin existe
     if os.path.exists(base_dir):
