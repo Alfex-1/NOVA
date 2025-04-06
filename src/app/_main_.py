@@ -1323,7 +1323,7 @@ if valid_mod:
             sorted_features = X_train.columns[sorted_idx]
 
             # Créer le graphique
-            plt.figure(figsize=(5, 3))
+            plt.figure(figsize=(3, 1))
             plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
             plt.yticks(range(len(sorted_features)), sorted_features, fontsize=5)
             plt.xticks(fontsize=5)
