@@ -757,7 +757,7 @@ if uploaded_file is not None:
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
-    st.sidebar.image(Image.open("logo_nova.png"), width=200)
+    st.sidebar.image(Image("logo_nova.png"), width=200)
     
     if wrang is True:            
         st.sidebar.title("Paramètres du traitement des données")
