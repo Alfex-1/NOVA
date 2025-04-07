@@ -64,34 +64,32 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str] = None,
-                list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
+def encode_data(df: pd.DataFrame,
+                list_binary: list[str] = None,
+                list_ordinal: list[str] = None,
+                list_nominal: list[str] = None,
+                ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
     """
-    Encode les variables catégorielles du DataFrame selon leur type.
-    - Binaire : One-Hot Encoding
-    - Ordinale : Mapping ou OrdinalEncoder
-    - Nominale : One-Hot Encoding
-
-    Args:
-        df : DataFrame original
-        list_binary : Colonnes binaires à encoder
-        list_ordinal : Colonnes ordinales à encoder
-        list_nominal : Colonnes nominales à encoder
-        ordinal_mapping : Mapping pour les colonnes ordinales
+    Encode les variables catégorielles du DataFrame selon leur nature.
+    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable)
+    - Ordinale : mapping dict ou OrdinalEncoder
+    - Nominale : OneHotEncoder classique
 
     Returns:
         DataFrame encodé
     """
     df = df.copy()
 
-    # Encodage des colonnes binaires (One-Hot)
+    # Binaire : OneHotEncoder avec drop='if_binary'
     if list_binary:
-        for col in list_binary:
-            dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
-            df = df.drop(columns=col)
-            df = pd.concat([df, dummies], axis=1)
+        encoder = OneHotEncoder(drop='if_binary', sparse=False)
+        encoded = encoder.fit_transform(df[list_binary])
+        encoded_cols = encoder.get_feature_names_out(list_binary)
+        df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
+        df = df.drop(columns=list_binary)
+        df = pd.concat([df, df_encoded], axis=1)
 
-    # Encodage des colonnes ordinales
+    # Ordinal
     if list_ordinal:
         for col in list_ordinal:
             if ordinal_mapping and col in ordinal_mapping:
@@ -100,12 +98,14 @@ def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: l
                 encoder = OrdinalEncoder()
                 df[col] = encoder.fit_transform(df[[col]])
 
-    # Encodage des colonnes nominales (One-Hot)
+    # Nominal : OneHotEncoder classique
     if list_nominal:
-        for col in list_nominal:
-            dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
-            df = df.drop(columns=col)
-            df = pd.concat([df, dummies], axis=1)
+        encoder = OneHotEncoder(drop=None, sparse=False)
+        encoded = encoder.fit_transform(df[list_nominal])
+        encoded_cols = encoder.get_feature_names_out(list_nominal)
+        df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
+        df = df.drop(columns=list_nominal)
+        df = pd.concat([df, df_encoded], axis=1)
 
     return df
 
