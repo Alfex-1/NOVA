@@ -28,6 +28,9 @@ import io
 import os
 import streamlit as st
 from PIL import Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
 
 
 def correlation_missing_values(df: pd.DataFrame):
@@ -759,14 +762,14 @@ if df is not None:
     if wrang is True:            
         st.sidebar.title("Paramètres du traitement des données")
         
-        target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list())
+        target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list(), help="Si vous n'avaez pas de variable cible, choisissez une variable au harsard.")
         pb = False
         wrang_finished = False
         
         st.sidebar.subheader("Mise à l'échelle des variables numériques")
         
         # Déterminer si la variable cible doit être incluse dans la mise à l'échelle
-        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False)
+        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Cochez cette case si vous ne souhaotez pas inclure une variable dans le traitement.")
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
         
         if drop_dupli:
@@ -875,10 +878,9 @@ if df is not None:
                 
         
         # Transformation de variables (ACP)
-        use_pca = st.sidebar.checkbox("Utiliser l'Analyse en Composantes Principales (ACP)", value=False)
+        use_pca = st.sidebar.checkbox("Utiliser l'Analyse en Composantes Principales (ACP)", value=False, help="⚠️ Il est fortement recommandé de mettre à l'échelle toutes les variables avec la même méthode avant d'appliquer l'ACP, au risque de la biaiser.")
         
         if use_pca:
-            st.sidebar.warning("⚠️ Il est fortement recommandé de mettre à l'échelle toutes les variables avec la même méthode avant d'appliquer l'ACP, au risque de la biaiser.")
             # Option pour spécifier le nombre de composantes ou la variance expliquée
             pca_option = st.sidebar.radio("Choisissez la méthode de sélection", ("Nombre de composantes", "Variance expliquée"))
 
@@ -941,8 +943,12 @@ if df is not None:
         # Application de l'ACP en fonction du choix de l'utilisateur
         if use_pca:
             pca = PCA()
-            df_explicatives = df_scaled.drop(columns=[target])
-            df_target = df_scaled[target]
+            if not use_target:
+                df_explicatives = df_scaled.drop(columns=[target])
+                df_target = df_scaled[target]
+            else:
+                df_explicatives = df_scaled.copy()
+                df_target = None
             
             # Si l'utilisateur choisit le nombre de composantes
             if pca_option == "Nombre de composantes":
@@ -961,8 +967,11 @@ if df is not None:
                 df_pca = pca.fit_transform(df_explicatives)
             
             df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
-            df_scaled = pd.concat([df_pca, df_target], axis=1)
-        
+            if df_target is not None:
+                df_scaled = pd.concat([df_pca, df_target], axis=1)
+            else:
+                df_scaled = df_pca.copy()
+                
         if use_pca:   
             pca_inertias = calculate_inertia(df_explicatives)
             pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
@@ -981,8 +990,6 @@ if df is not None:
                 legend_title='Type de variance',
                 width=900, height=600
             )
-            
-            st.plotly_chart(fig)
         
         # Finir le traitement
         wrang_finished = True
@@ -1007,6 +1014,9 @@ if df is not None:
                 })
             st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
         
+            if use_pca:
+                st.plotly_chart(fig)
+        
         # Téléchargement du fichier encodé
         if df is not None and wrang_finished and not pb:
             df = df_scaled.copy()
@@ -1029,9 +1039,22 @@ if df is not None:
     else:
         # Modélisation
         st.sidebar.title("Paramètres de Modélisation")
+        
+        # Initialisation du document PDF
+        doc = SimpleDocTemplate("rapport_modelisation.pdf", pagesize=A4)
+        story = []
+        styles = getSampleStyleSheet()
+        titre = Paragraph("Rapport de Modélisation Automatique", styles['Title'])
+        story.append(titre)
+        story.append(Spacer(1, 24)) 
 
         # Définition de la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
+        story.append(Paragraph("Titre de section", styles['Heading2']))
+        story.append(Paragraph("Voici une description quelconque du modèle.", styles['Normal']))
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(f"Variable cible sélectionnée : <b>{target}</b>", styles['Normal']))
+        story.append(Spacer(1, 12))
         
         # Division des données
         test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
@@ -1264,7 +1287,6 @@ if valid_mod:
             bias_variance_results.append({
                 # "Average Squared Loss": round(expected_loss, 3),
                 "Bias": round(bias, 3),
-                "Bias²": round(bias**2, 3),
                 "Variance": round(var, 3)})        
         
     # Création du DataFrame
@@ -1323,7 +1345,7 @@ if valid_mod:
             sorted_features = X_train.columns[sorted_idx]
 
             # Créer le graphique
-            plt.figure(figsize=(3, 1))
+            plt.figure(figsize=(5, 3))
             plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
             plt.yticks(range(len(sorted_features)), sorted_features, fontsize=5)
             plt.xticks(fontsize=5)
@@ -1339,20 +1361,21 @@ if valid_mod:
         # Créer le dossier s'il n'existe pas
         os.makedirs(save_dir, exist_ok=True)
         
-        # Exemple de dataframe df_score avec les modèles
+        # Sauvegarde des modèles
         for index, row in df_score.iterrows():
-            model_name = index  # Nom du modèle
-            best_model = row['Best Model']  # L'instance du modèle
-            
-            # Chemin de sauvegarde pour chaque modèle
+            model_name = index
+            best_model = row['Best Model']
             file_path = os.path.join(save_dir, f"{model_name}.pkl")
-            
-            # Sauvegarde du modèle dans un fichier .pkl
             with open(file_path, "wb") as f:
                 pickle.dump(best_model, f)
         
-        # Afficher un message de succès
-        st.success(f"✅ Tous les modèles ont été enregistrés dans le dossier `{save_dir}`.")
+        # Génération du rapport PDF
+        pdf_path = os.path.join(save_dir, "rapport_modelisation.pdf")
+        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+        doc.build(story)  # story doit avoir été remplie au préalable
+
+        # Message de succès global
+        st.success(f"✅ Tous les modèles et le rapport PDF ont été enregistrés dans `{save_dir}`.")
     else:
-        st.error("Le chemin spécifié n'existe pas ou n'est pas valide.")
+        st.error("❌ Le chemin spécifié n'existe pas ou n'est pas valide.")
  
