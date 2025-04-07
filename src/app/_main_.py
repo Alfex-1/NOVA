@@ -985,20 +985,20 @@ if df is not None:
         st.sidebar.title("Paramètres de Modélisation")
         
         # Initialisation du document PDF
-        doc = SimpleDocTemplate("rapport_modelisation.pdf", pagesize=A4)
-        story = []
-        styles = getSampleStyleSheet()
-        titre = Paragraph("Rapport de Modélisation Automatique", styles['Title'])
-        story.append(titre)
-        story.append(Spacer(1, 24)) 
+        # doc = SimpleDocTemplate("rapport_modelisation.pdf", pagesize=A4)
+        # story = []
+        # styles = getSampleStyleSheet()
+        # titre = Paragraph("Rapport de Modélisation Automatique", styles['Title'])
+        # story.append(titre)
+        # story.append(Spacer(1, 24)) 
 
         # Définition de la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
-        story.append(Paragraph("Titre de section", styles['Heading2']))
-        story.append(Paragraph("Voici une description quelconque du modèle.", styles['Normal']))
-        story.append(Spacer(1, 12))
-        story.append(Paragraph(f"Variable cible sélectionnée : <b>{target}</b>", styles['Normal']))
-        story.append(Spacer(1, 12))
+        # story.append(Paragraph("Titre de section", styles['Heading2']))
+        # story.append(Paragraph("Voici une description quelconque du modèle.", styles['Normal']))
+        # story.append(Spacer(1, 12))
+        # story.append(Paragraph(f"Variable cible sélectionnée : <b>{target}</b>", styles['Normal']))
+        # story.append(Spacer(1, 12))
         
         # Division des données
         test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
