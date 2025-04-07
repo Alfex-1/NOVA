@@ -28,7 +28,7 @@ import io
 import os
 import streamlit as st
 from PIL import Image
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
+# from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 
@@ -757,7 +757,7 @@ if uploaded_file is not None:
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
-    st.sidebar.image(Image("logo_nova.png"), width=200)
+    st.sidebar.image(Image.open("logo_nova.png"), width=200)
     
     if wrang is True:            
         st.sidebar.title("Paramètres du traitement des données")
@@ -1330,7 +1330,7 @@ if valid_mod:
             model.fit(X_train, y_train)
             
             # Calculer l'importance des features par permutation
-            result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
+            result = permutation_importance(model, X_test, y_test, n_repeats=int(trial*1.5), random_state=42)
 
             # Extraire l'importance moyenne des features
             importances = result.importances_mean
