@@ -393,57 +393,105 @@ def calculate_inertia(X):
         inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
     return inertias
 
-def objective_linear(trial):
-    model_type = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
+# def objective_linear(trial):
+#     model_type = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
+    
+#     if model_type == "linear":
+#         model = LinearRegression()
+    
+#     elif model_type == "ridge":
+#         alpha = trial.suggest_float("ridge_alpha", 1e-3, 10.0, step=0.01)
+#         alpha = round(alpha, 2)
+#         model = Ridge(alpha=alpha)
 
-    if model_type == "linear":
-        model = LinearRegression()  # Pas d'hyperparamètre à tuner
-    else:
-        alpha = trial.suggest_float("alpha", 1e-3, 10.001, step=0.01)
-        alpha = round(alpha, 3)
+#     elif model_type == "lasso":
+#         alpha = trial.suggest_float("lasso_alpha", 1e-3, 10.0, step=0.01)
+#         alpha = round(alpha, 2)
+#         model = Lasso(alpha=alpha)
+
+#     elif model_type == "elasticnet":
+#         alpha = trial.suggest_float("enet_alpha", 1e-3, 10.0, step=0.01)
+#         l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
+#         alpha = round(alpha, 2)
+#         l1_ratio = round(l1_ratio, 2)
+#         model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
+    
+#     # Évaluer avec validation croisée
+#     cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+#     mean_score = cross["test_score"].mean()
+#     mean_time = results["score_time"].mean()
+#     return mean_score, mean_time
+
+# def objective_logistic(trial, multi_class=False):
+#     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
+#     C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
+#     C = round(C, 3)
+    
+#     if penalty == "elasticnet":
+#         l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
+#         l1_ratio = round(l1_ratio, 2)
+#         model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
+#     elif penalty == "l1":
+#         solver = "saga" if multi_class else "liblinear"
+#         model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+#     elif penalty == "l2":
+#         solver = "saga" if multi_class else "lbfgs"
+#         model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+#     else:
+#         solver = "saga" if multi_class else "lbfgs"
+#         model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
+    
+#     # Évaluer avec validation croisée
+#     cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+#     mean_score = cross["test_score"].mean()
+#     mean_time = results["score_time"].mean()
+#     return mean_score, mean_time
+
+def objective(trial, task="Classification", model_type="Random Forest", multi_class=False):
+    if model_type == "Linear Regression":
+        # Définition des hyperparamètres pour Linear Regressio,
+        model_linreg = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
+    
+        if model_linreg == "linear":
+            model = LinearRegression()
         
-        if model_type == "elasticnet":
-            l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
+        elif model_linreg == "ridge":
+            alpha = trial.suggest_float("ridge_alpha", 1e-3, 10.0, step=0.01)
+            alpha = round(alpha, 2)
+            model = Ridge(alpha=alpha)
+
+        elif model_linreg == "lasso":
+            alpha = trial.suggest_float("lasso_alpha", 1e-3, 10.0, step=0.01)
+            alpha = round(alpha, 2)
+            model = Lasso(alpha=alpha)
+
+        elif model_linreg == "elasticnet":
+            alpha = trial.suggest_float("enet_alpha", 1e-3, 10.0, step=0.01)
+            l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
+            alpha = round(alpha, 2)
             l1_ratio = round(l1_ratio, 2)
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
-        elif model_type == "lasso":
-            model = Lasso(alpha=alpha)
+    
+    if model_type == "Logistic Regression":
+        penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
+        C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
+        C = round(C, 3)
+        
+        if penalty == "elasticnet":
+            l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
+            l1_ratio = round(l1_ratio, 2)
+            model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
+        elif penalty == "l1":
+            solver = "saga" if multi_class else "liblinear"
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+        elif penalty == "l2":
+            solver = "saga" if multi_class else "lbfgs"
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
         else:
-            model = Ridge(alpha=alpha)
+            solver = "saga" if multi_class else "lbfgs"
+            model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
     
-    # Évaluer avec validation croisée
-    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
-    mean_score = cross["test_score"].mean()
-    mean_time = results["score_time"].mean()
-    return mean_score, mean_time
-
-def objective_logistic(trial, multi_class=False):
-    penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
-    C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
-    C = round(C, 3)
-    
-    if penalty == "elasticnet":
-        l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
-        l1_ratio = round(l1_ratio, 2)
-        model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
-    elif penalty == "l1":
-        solver = "saga" if multi_class else "liblinear"
-        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
-    elif penalty == "l2":
-        solver = "saga" if multi_class else "lbfgs"
-        model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
-    else:
-        solver = "saga" if multi_class else "lbfgs"
-        model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
-    
-    # Évaluer avec validation croisée
-    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
-    mean_score = cross["test_score"].mean()
-    mean_time = results["score_time"].mean()
-    return mean_score, mean_time
-
-def objective(trial, task="Classification", model_type="Random Forest"):
-    if model_type == "Random Forest":
+    elif model_type == "Random Forest":
         # Définition des hyperparamètres pour Random Forest
         n_estimators = trial.suggest_int("n_estimators", 10, 500)
         max_depth = trial.suggest_int("max_depth", 2, 15)
@@ -509,9 +557,11 @@ def objective(trial, task="Classification", model_type="Random Forest"):
     return mean_score, mean_time
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
+    study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
+    
     if model_choosen == "Linear Regression":
-        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(objective_linear, n_trials=n_trials, n_jobs=n_jobs, timeout=80)
+        # study.optimize(objective_linear, n_trials=n_trials, n_jobs=n_jobs, timeout=80)
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -525,8 +575,8 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             best_model = ElasticNet(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"])
 
     elif model_choosen == "Logistic Regression":
-        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
-        study.optimize(lambda trial: objective_logistic(trial, multi_class=multi_class), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
+        # study.optimize(lambda trial: objective_logistic(trial, multi_class=multi_class), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
         best_params = study.best_params
         best_value = study.best_value
         
@@ -547,7 +597,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             best_model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
 
     elif model_choosen == "Random Forest":
-        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
         best_params = study.best_params
         best_value = study.best_value
@@ -576,7 +625,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
                 max_features=max_features,
                 bootstrap=bootstrap)
     elif model_choosen == "KNN":
-        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
@@ -601,7 +649,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             )
 
     elif model_choosen == "SVM":
-        study = optuna.create_study(direction="maximize", sampler=TPESampler(), pruner=HyperbandPruner())
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=100)
         best_params = study.best_params
         best_value = study.best_value
@@ -1172,7 +1219,7 @@ if valid_mod:
     df_train2 = df_train.copy()
     df_train2["Best Model"] = df_train2["Best Model"].astype(str)   
     st.dataframe(df_train2)
-    st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
+    # st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
     
     # 7. Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
@@ -1298,8 +1345,8 @@ if valid_mod:
             # Créer le graphique
             plt.figure(figsize=(5, 3))
             plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=5)
-            plt.xticks(fontsize=5)
+            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
+            plt.xticks(fontsize=6)
             plt.xlabel("Importance", fontsize=7)
             plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
             plt.gca().invert_yaxis()
