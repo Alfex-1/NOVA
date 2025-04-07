@@ -64,7 +64,52 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
+def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str] = None,
+                list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
+    """
+    Encode les variables catégorielles du DataFrame selon leur type.
+    - Binaire : One-Hot Encoding
+    - Ordinale : Mapping ou OrdinalEncoder
+    - Nominale : One-Hot Encoding
+
+    Args:
+        df : DataFrame original
+        list_binary : Colonnes binaires à encoder
+        list_ordinal : Colonnes ordinales à encoder
+        list_nominal : Colonnes nominales à encoder
+        ordinal_mapping : Mapping pour les colonnes ordinales
+
+    Returns:
+        DataFrame encodé
+    """
+    df = df.copy()
+
+    # Encodage des colonnes binaires (One-Hot)
+    if list_binary:
+        for col in list_binary:
+            dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
+            df = df.drop(columns=col)
+            df = pd.concat([df, dummies], axis=1)
+
+    # Encodage des colonnes ordinales
+    if list_ordinal:
+        for col in list_ordinal:
+            if ordinal_mapping and col in ordinal_mapping:
+                df[col] = df[col].map(ordinal_mapping[col])
+            else:
+                encoder = OrdinalEncoder()
+                df[col] = encoder.fit_transform(df[[col]])
+
+    # Encodage des colonnes nominales (One-Hot)
+    if list_nominal:
+        for col in list_nominal:
+            dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
+            df = df.drop(columns=col)
+            df = pd.concat([df, dummies], axis=1)
+
+    return df
+
+def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
     Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
 
@@ -403,21 +448,21 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             model = LinearRegression()
         
         elif model_linreg == "ridge":
-            alpha = trial.suggest_float("ridge_alpha", 1e-3, 10.0, step=0.01)
-            alpha = round(alpha, 2)
-            model = Ridge(alpha=alpha)
+            ridge_alpha = trial.suggest_float("ridge_alpha", 1e-3, 10.0, step=0.01)
+            ridge_alpha = round(ridge_alpha, 2)
+            model = Ridge(alpha=ridge_alpha)
 
         elif model_linreg == "lasso":
-            alpha = trial.suggest_float("lasso_alpha", 1e-3, 10.0, step=0.01)
-            alpha = round(alpha, 2)
-            model = Lasso(alpha=alpha)
+            lasso_alpha = trial.suggest_float("lasso_alpha", 1e-3, 10.0, step=0.01)
+            lasso_alpha = round(lasso_alpha, 2)
+            model = Lasso(alpha=lasso_alpha)
 
         elif model_linreg == "elasticnet":
-            alpha = trial.suggest_float("enet_alpha", 1e-3, 10.0, step=0.01)
+            enet_alpha = trial.suggest_float("enet_alpha", 1e-3, 10.0, step=0.01)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
-            alpha = round(alpha, 2)
+            enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
-            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
+            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
     
     if model_type == "Logistic Regression":
         penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
@@ -513,11 +558,11 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         if best_params["model"] == "linear":
             best_model = LinearRegression()
         elif best_params["model"] == "ridge":
-            best_model = Ridge(alpha=best_params["alpha"])
+            best_model = Ridge(alpha=best_params["ridge_alpha"])
         elif best_params["model"] == "lasso":
-            best_model = Lasso(alpha=best_params["alpha"])
+            best_model = Lasso(alpha=best_params["lasso_alpha"])
         elif best_params["model"] == "elasticnet":
-            best_model = ElasticNet(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"])
+            best_model = ElasticNet(alpha=best_params["enet_alpha"], l1_ratio=best_params["l1_ratio"])
 
     elif model_choosen == "Logistic Regression":
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
