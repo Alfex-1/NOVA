@@ -63,63 +63,7 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict] = None):
-    """
-    Encode les variables catégorielles d'un DataFrame selon leur nature : binaire, ordinale ou nominale.
-
-    - **Binaire** : One-Hot Encoding avec `drop='if_binary'` pour éviter la redondance (1 seule colonne encodée).
-    - **Ordinal** : Mapping manuel si fourni, sinon encodage automatique avec `OrdinalEncoder`.
-    - **Nominal** : One-Hot Encoding complet sans drop.
-
-    Les colonnes non spécifiées sont conservées telles quelles.
-
-    Args:
-        df (pd.DataFrame): Le DataFrame original à transformer.
-        list_binary (list[str], optional): Colonnes à encoder comme binaires via One-Hot. 
-        list_ordinal (list[str], optional): Colonnes à encoder comme ordinales (via mapping ou encodage automatique).
-        list_nominal (list[str], optional): Colonnes à encoder comme nominales (One-Hot complet).
-        ordinal_mapping (dict[str, dict], optional): Dictionnaire définissant l'ordre des modalités pour les variables ordinales.
-            Format : {'colonne': {'mod1': 0, 'mod2': 1, ...}}.
-
-    Returns:
-        pd.DataFrame: DataFrame avec toutes les variables encodées et concaténées, incluant les colonnes numériques non transformées.
-    """
-    df_encoded_parts = []
-
-    # Binaire → OneHot
-    if list_binary:
-        onehot = OneHotEncoder(sparse_output=False, drop='if_binary', handle_unknown='ignore')
-        binary_encoded = onehot.fit_transform(df[list_binary])
-        binary_columns = onehot.get_feature_names_out(list_binary)
-        df_encoded_parts.append(pd.DataFrame(binary_encoded, columns=binary_columns, index=df.index))
-
-    # Ordinal → mapping explicite ou OrdinalEncoder
-    if list_ordinal:
-        df_ordinal = pd.DataFrame(index=df.index)
-        for col in list_ordinal:
-            if ordinal_mapping and col in ordinal_mapping:
-                df_ordinal[col] = df[col].map(ordinal_mapping[col])
-            else:
-                encoder = OrdinalEncoder()
-                df_ordinal[col] = encoder.fit_transform(df[[col]])
-        df_encoded_parts.append(df_ordinal)
-
-    # Nominal → OneHot
-    if list_nominal:
-        onehot = OneHotEncoder(sparse_output=False, drop=None)
-        nominal_encoded = onehot.fit_transform(df[list_nominal])
-        nominal_columns = onehot.get_feature_names_out(list_nominal)
-        df_encoded_parts.append(pd.DataFrame(nominal_encoded, columns=nominal_columns, index=df.index))
-
-    # Reste des colonnes numériques (non encodées)
-    cols_used = set((list_binary or []) + (list_ordinal or []) + (list_nominal or []))
-    cols_remaining = [col for col in df.columns if col not in cols_used]
-    df_encoded_parts.append(df[cols_remaining])
-
-    return pd.concat(df_encoded_parts, axis=1)
-
-
-def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
+def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
     Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
 
@@ -1369,10 +1313,10 @@ if valid_mod:
             with open(file_path, "wb") as f:
                 pickle.dump(best_model, f)
         
-        # Génération du rapport PDF
-        pdf_path = os.path.join(save_dir, "rapport_modelisation.pdf")
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        doc.build(story)  # story doit avoir été remplie au préalable
+        # # Génération du rapport PDF
+        # pdf_path = os.path.join(save_dir, "rapport_modelisation.pdf")
+        # doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+        # doc.build(story)  # story doit avoir été remplie au préalable
 
         # Message de succès global
         st.success(f"✅ Tous les modèles et le rapport PDF ont été enregistrés dans `{save_dir}`.")
