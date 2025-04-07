@@ -83,7 +83,7 @@ def encode_data(df: pd.DataFrame,
     # Binaire : OneHotEncoder avec drop='if_binary'
     if list_binary:
         for col in list_binary:
-            encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
+            encoder = OneHotEncoder(drop='first', sparse_output=False)
             encoded = encoder.fit_transform(df[[col]])
             encoded_cols = encoder.get_feature_names_out([col])
             df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
