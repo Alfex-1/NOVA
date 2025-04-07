@@ -82,12 +82,13 @@ def encode_data(df: pd.DataFrame,
 
     # Binaire : OneHotEncoder avec drop='if_binary'
     if list_binary:
-        encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
-        encoded = encoder.fit_transform(df[list_binary])
-        encoded_cols = encoder.get_feature_names_out(list_binary)
-        df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
-        df = df.drop(columns=list_binary)
-        df = pd.concat([df, df_encoded], axis=1)
+        for col in list_binary:
+            encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
+            encoded = encoder.fit_transform(df[[col]])
+            encoded_cols = encoder.get_feature_names_out([col])
+            df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
+            df = df.drop(columns=col)
+            df = pd.concat([df, df_encoded], axis=1)
 
     # Ordinal
     if list_ordinal:
