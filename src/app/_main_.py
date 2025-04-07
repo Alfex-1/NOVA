@@ -1323,7 +1323,7 @@ if valid_mod:
         plt.close()
         
     # Analyse de drift
-    st.subheader("Analyse de drift : comparaison des distributions entre Train et Test")
+    st.subheader("Analyse de drift : comparaison des distributions entre apprentissage et validation")
     
     drift_results = []
 
@@ -1336,8 +1336,14 @@ if valid_mod:
             "Drift détecté": "Oui" if p_value < 0.05 else "Non"
         })
 
-    df_drift = pd.DataFrame(drift_results).sort_values("KS Statistic", ascending=False)
-    st.dataframe(df_drift)
+    df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
+    df_drift=df_drift.set_index("Feature", inplace=True)
+    df_drift = df_drift[df_drift["Drift détecté"] == True].drop(columns="Drift détecté")
+    
+    if not df_drift.empty:
+        st.dataframe(df_drift)
+    else:
+        st.info("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")
     
     # Vérifier si le chemin existe
     if os.path.exists(base_dir):
