@@ -16,7 +16,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
+from sklearn.model_selection import train_test_split, cross_validate
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
 import optuna
@@ -412,8 +412,10 @@ def objective_linear(trial):
             model = Ridge(alpha=alpha)
     
     # Évaluer avec validation croisée
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
-    return score
+    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+    mean_score = cross["test_score"].mean()
+    mean_time = results["score_time"].mean()
+    return mean_score, mean_time
 
 def objective_logistic(trial, multi_class=False):
     penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
@@ -435,8 +437,10 @@ def objective_logistic(trial, multi_class=False):
         model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
     
     # Évaluer avec validation croisée
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
-    return score
+    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+    mean_score = cross["test_score"].mean()
+    mean_time = results["score_time"].mean()
+    return mean_score, mean_time
 
 def objective(trial, task="Classification", model_type="Random Forest"):
     if model_type == "Random Forest":
@@ -499,8 +503,10 @@ def objective(trial, task="Classification", model_type="Random Forest"):
             epsilon = round(epsilon,2)
             model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
     
-    score = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp).mean()
-    return score
+    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+    mean_score = cross["test_score"].mean()
+    mean_time = results["score_time"].mean()
+    return mean_score, mean_time
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
     if model_choosen == "Linear Regression":
@@ -837,7 +843,8 @@ if df is not None:
         # Appliquer les modifications
         
         # 1. Analyser la corrélation des valeurs manquantes
-        df = df.dropna(subset=[target])
+        if not use_target:
+            df = df.dropna(subset=[target])
         corr_mat, prop_nan = correlation_missing_values(df)
 
         # 2. Détecter les outliers
@@ -939,17 +946,17 @@ if df is not None:
         wrang_finished = True
         # Afficher le descriptif de la base de données
         st.write("### Descriptif de la base de données :")
-        st.write("**Nombre d'observations :**", df.shape[0])
-        st.write("**Nombre de variables :**", df.shape[1])
+        st.write("**Nombre d'observations :**", df_scaled.shape[0])
+        st.write("**Nombre de variables :**", df_scaled.shape[1])
         if df is not None:
             description = []
-            for col in df.columns:
-                if pd.api.types.is_numeric_dtype(df[col]):
+            for col in df_scaled.columns:
+                if pd.api.types.is_numeric_dtype(df_scaled[col]):
                     var_type = 'Numérique'
                     n_modalites = np.nan
                 else:
                     var_type = 'Catégorielle'
-                    n_modalites = df[col].nunique()
+                    n_modalites = df_scaled[col].nunique()
                 
                 description.append({
                     'Variable': col,
@@ -970,7 +977,7 @@ if df is not None:
             
             # Afficher l'aperçu des données traitées
             st.write("### Aperçu des données traitées :")
-            st.dataframe(df)
+            st.dataframe(df_scaled)
 
             # Afficher le bouton pour télécharger le fichier
             st.download_button(
