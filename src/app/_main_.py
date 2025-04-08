@@ -17,7 +17,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split, cross_validate, learning_curve
+from sklearn.model_selection import train_test_split, cross_val_score, cross_validate, learning_curve
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
 import tensorflow as tf
@@ -601,10 +601,13 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         model_class = KerasRegressor if task == "Regression" else KerasClassifier
         model = model_class(model=build_model_mlp, epochs=500, batch_size=32,
                             verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
-    
-    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
-    mean_score = cross["test_score"].mean()
-    return mean_score
+    if model_type == "MLP":
+        results = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp)
+        return results
+    else:
+        cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+        mean_score = cross["test_score"].mean()
+        return mean_score
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, onehot: bool = False, n_trials: int =70, n_jobs: int =-1):
     study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
