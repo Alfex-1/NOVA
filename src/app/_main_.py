@@ -604,8 +604,6 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
 
             # Vérification de l'optimiseur choisi, avec valeur par défaut "adam"
             optimizer = optimizers.get(optimizer_name.lower(), keras.optimizers.Adam(learning_rate=learning_rate))
-            
-            # optimizer = getattr(keras.optimizers, optimizer_name.capitalize())(learning_rate=learning_rate)
             model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
             return model
 
