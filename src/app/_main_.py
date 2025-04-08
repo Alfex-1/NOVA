@@ -550,7 +550,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         # Définition des hyperparamètres pour un MLP (keras)
         n_layers = trial.suggest_int("n_layers", 1, 20)
         n_neurons = trial.suggest_int("n_neurons", 1, 501, step=10)
-        dropout = trial.suggest_float("dropout", 0, 1, step=0.1)
+        dropout = trial.suggest_float("dropout", 0, 0.5, step=0.1)
         learning_rate = trial.suggest_float("learning_rate", 0.00001, 0.01, log=True)
         activation = trial.suggest_categorical("activation", ["relu", "tanh"])
         optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
