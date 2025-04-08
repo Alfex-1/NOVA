@@ -556,14 +556,14 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
         initializer = trial.suggest_categorical("initializer", ["glorot_uniform", "he_normal", "lecun_normal"])
         batch_norm = trial.suggest_categorical("batch_norm", [True, False])
-        l1_reg = trial.suggest_float("l1_reg", 0.0, 0.01, log=True)
-        l2_reg = trial.suggest_float("l2_reg", 0.0, 0.01, log=True)
+        l1_reg = trial.suggest_float("l1_reg", 0.001, 0.1, log=True)
+        l2_reg = trial.suggest_float("l2_reg", 0.001, 0.1, log=True)
         
         # Arrondir les float
         dropout = round(dropout, 1)
         learning_rate = round(learning_rate, 5)
-        l1_reg = round(l1_reg, 2)
-        l2_reg = round(l2_reg, 2)
+        l1_reg = round(l1_reg, 3)
+        l2_reg = round(l2_reg, 3)
         
         if task == 'Regression':
             if scoring_comp in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"]:
