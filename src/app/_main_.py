@@ -593,7 +593,19 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
                     model.add(keras.layers.BatchNormalization())
                 model.add(keras.layers.Dropout(dropout))
             model.add(keras.layers.Dense(neuron_out, activation=activation_out))
-            optimizer = getattr(keras.optimizers, optimizer_name.capitalize())(learning_rate=learning_rate)
+            
+            optimizers = {
+                "adam": keras.optimizers.Adam(learning_rate=learning_rate),
+                "sgd": keras.optimizers.SGD(learning_rate=learning_rate),
+                "rmsprop": keras.optimizers.RMSprop(learning_rate=learning_rate),
+                "adagrad": keras.optimizers.Adagrad(learning_rate=learning_rate),
+                "adamax": keras.optimizers.Adamax(learning_rate=learning_rate),
+            }
+
+            # Vérification de l'optimiseur choisi, avec valeur par défaut "adam"
+            optimizer = optimizers.get(optimizer_name.lower(), keras.optimizers.Adam(learning_rate=learning_rate))
+            
+            # optimizer = getattr(keras.optimizers, optimizer_name.capitalize())(learning_rate=learning_rate)
             model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
             return model
 
