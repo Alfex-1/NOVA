@@ -8,9 +8,9 @@ import plotly.express as px
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
-from scipy.stats.mstats import winsorize
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
 from scipy import stats
+from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.svm import SVC, SVR
@@ -20,21 +20,21 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_validate, learning_curve
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score, make_scorer
+import tensorflow as tf
+from tensorflow import keras
+from scikeras.wrappers import KerasClassifier, KerasRegressor
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
 from sklearn.metrics import confusion_matrix
-from io import BytesIO
 import io
+from io import BytesIO
 import os
 import streamlit as st
 from PIL import Image
 # from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
-from tensorflow import keras
-from scikeras.wrappers import KerasClassifier, KerasRegressor
 
 
 def correlation_missing_values(df: pd.DataFrame):
