@@ -20,6 +20,7 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_validate, learning_curve
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score, make_scorer
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
@@ -32,6 +33,8 @@ from PIL import Image
 # from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
+from tensorflow import keras
+from scikeras.wrappers import KerasClassifier, KerasRegressor
 
 
 def correlation_missing_values(df: pd.DataFrame):
@@ -71,24 +74,23 @@ def encode_data(df: pd.DataFrame,
                 ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
     """
     Encode les variables catégorielles du DataFrame selon leur nature.
-    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable)
+    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable conservée)
     - Ordinale : mapping dict ou OrdinalEncoder
-    - Nominale : OneHotEncoder classique
-
+    - Nominale : OneHotEncoder classique (toutes les modalités)
+    
     Returns:
         DataFrame encodé
     """
     df = df.copy()
 
-    # Binaire : OneHotEncoder avec drop='if_binary'
+    # Binaire
     if list_binary:
-        for col in list_binary:
-            encoder = OneHotEncoder(drop='first', sparse_output=False)
-            encoded = encoder.fit_transform(df[[col]])
-            encoded_cols = encoder.get_feature_names_out([col])
-            df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
-            df = df.drop(columns=col)
-            df = pd.concat([df, df_encoded], axis=1)
+        encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
+        encoded_array = encoder.fit_transform(df[list_binary])
+        encoded_cols = encoder.get_feature_names_out(list_binary)
+        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
+        df.drop(columns=list_binary, inplace=True)
+        df = pd.concat([df, encoded_df], axis=1)
 
     # Ordinal
     if list_ordinal:
@@ -99,14 +101,14 @@ def encode_data(df: pd.DataFrame,
                 encoder = OrdinalEncoder()
                 df[col] = encoder.fit_transform(df[[col]])
 
-    # Nominal : OneHotEncoder classique
+    # Nominal
     if list_nominal:
         encoder = OneHotEncoder(drop=None, sparse_output=False)
-        encoded = encoder.fit_transform(df[list_nominal])
+        encoded_array = encoder.fit_transform(df[list_nominal])
         encoded_cols = encoder.get_feature_names_out(list_nominal)
-        df_encoded = pd.DataFrame(encoded, columns=encoded_cols, index=df.index)
-        df = df.drop(columns=list_nominal)
-        df = pd.concat([df, df_encoded], axis=1)
+        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
+        df.drop(columns=list_nominal, inplace=True)
+        df = pd.concat([df, encoded_df], axis=1)
 
     return df
 
@@ -440,7 +442,7 @@ def calculate_inertia(X):
         inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
     return inertias
 
-def objective(trial, task="Classification", model_type="Random Forest", multi_class=False):
+def objective(trial, task="Classification", model_type="Random Forest", multi_class=False, onehot=False):
     if model_type == "Linear Regression":
         # Définition des hyperparamètres pour Linear Regressio,
         model_linreg = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
@@ -465,7 +467,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             l1_ratio = round(l1_ratio, 2)
             model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
     
-    if model_type == "Logistic Regression":
+    elif model_type == "Logistic Regression":
         penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
         C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
         C = round(C, 3)
@@ -543,12 +545,68 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             epsilon = trial.suggest_float("epsilon", 0.01, 1.0, step=0.01)
             epsilon = round(epsilon,2)
             model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
+            
+    elif model_type == "MLP":
+        # Définition des hyperparamètres pour un MLP (keras)
+        n_layers = trial.suggest_int("n_layers", 1, 5)
+        n_neurons = trial.suggest_int("n_neurons", 16, 256, step=16)
+        dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.05)
+        learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-1, log=True)
+        activation = trial.suggest_categorical("activation", ["relu", "tanh", "selu"])
+        optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
+        initializer = trial.suggest_categorical("initializer", ["glorot_uniform", "he_normal", "lecun_normal"])
+        batch_norm = trial.suggest_categorical("batch_norm", [True, False])
+        l1_reg = trial.suggest_float("l1_reg", 0.0, 1e-2, step=0.001)
+        l2_reg = trial.suggest_float("l2_reg", 0.0, 1e-2, step=0.001)
+        
+        if task == 'Regression':
+            if scoring_comp in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"]:
+                loss = "mse"
+            if scoring_comp in ["neg_mean_absolute_error", "neg_mean_absolute_percentage_error"]:
+                loss = "mae"
+            activation_out="linear"
+            neuron_out = 1
+            metric_keras=[tf.keras.metrics.RSquared(), "mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
+        else:
+            if multi_class:
+                loss = "categorical_crossentropy" if onehot else "sparse_categorical_crossentropy"
+                activation_out="softmax"
+                neuron_out = len(np.unique(y_train))
+            else:
+                loss="binary_crossentropy"
+                activation_out="sigmoid"
+                neuron_out = 1
+            
+            metric_keras=["accuracy", tf.keras.metrics.Precision(name="precision"),tf.keras.metrics.Recall(name="recall"), tf.keras.metrics.AUC(name="auc")]
+
+        def build_model_mlp():
+            model = keras.Sequential()
+            regularizer = keras.regularizers.l1_l2(l1=l1_reg, l2=l2_reg)
+            model.add(keras.layers.Input(shape=(X_train.shape[1],)))
+            if batch_norm:
+                model.add(keras.layers.BatchNormalization())
+            for _ in range(n_layers):
+                model.add(keras.layers.Dense(n_neurons, activation=activation,
+                                            kernel_initializer=initializer,
+                                            kernel_regularizer=regularizer))
+                if batch_norm:
+                    model.add(keras.layers.BatchNormalization())
+                model.add(keras.layers.Dropout(dropout))
+            model.add(keras.layers.Dense(neuron_out, activation=activation_out))
+            optimizer = getattr(keras.optimizers, optimizer_name.capitalize())(learning_rate=learning_rate)
+            model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
+            return model
+
+        # Choix du modèle KerasRegressor ou KerasClassifier selon la tâche
+        model_class = KerasRegressor if task == "Regression" else KerasClassifier
+        model = model_class(model=build_model_mlp, epochs=500, batch_size=32,
+                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
     
     cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
     mean_score = cross["test_score"].mean()
     return mean_score
 
-def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
+def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, onehot: bool = False, n_trials: int =70, n_jobs: int =-1):
     study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
     
     if model_choosen == "Linear Regression":
@@ -654,7 +712,59 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
             epsilon = best_params["epsilon"]
             best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
         else:
-            best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)    
+            best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
+            
+    elif model_choosen == "MLP":
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
+        best_params = study.best_params
+        best_value = study.best_value
+        
+        def build_best_model():
+            model = keras.Sequential()
+            regularizer = keras.regularizers.l1_l2(l1=best_params["l1_reg"], l2=best_params["l2_reg"])
+            model.add(keras.layers.Input(shape=(X_train.shape[1],)))
+            
+            if best_params["batch_norm"]:
+                model.add(keras.layers.BatchNormalization())
+            for _ in range(best_params["n_layers"]):
+                model.add(keras.layers.Dense(best_params["n_neurons"], activation=best_params["activation"],
+                                             kernel_initializer=best_params["initializer"],
+                                             kernel_regularizer=regularizer))
+                if best_params["batch_norm"]:
+                    model.add(keras.layers.BatchNormalization())
+                model.add(keras.layers.Dropout(best_params["dropout"]))
+            
+            if task == 'Regression':
+                activation_out = "linear"
+                neuron_out=1
+                loss = "mse" if best_params["scoring_comp"] in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"] else "mae"
+                metric_keras = [tf.keras.metrics.RSquared(), "mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
+            else:
+                if multi_class:
+                    if onehot:
+                        loss = "categorical_crossentropy"
+                    else:
+                        loss = "sparse_categorical_crossentropy"
+                    activation_out = "softmax"
+                    neuron_out=len(np.unique(y_train))
+                else:
+                    loss = "binary_crossentropy"
+                    activation_out = "sigmoid"
+                    neuron_out=1
+
+                metric_keras = ["accuracy", tf.keras.metrics.Precision(name="precision"),
+                                tf.keras.metrics.Recall(name="recall"), tf.keras.metrics.AUC(name="auc")]
+
+            
+            model.add(keras.layers.Dense(neuron_out, activation=activation_out))
+            model.add(keras.layers.Dense(len(np.unique(y_train)), activation=activation_out))
+            optimizer = getattr(keras.optimizers, best_params["optimizer_name"].capitalize())(learning_rate=best_params["learning_rate"])
+            model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
+            return model
+        
+        model_class = KerasRegressor if task == "Regression" else KerasClassifier
+        best_model = model_class(model=build_best_model, epochs=500, batch_size=32,
+                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
         
     return best_model, best_params, best_value
 
@@ -1061,9 +1171,9 @@ if df is not None:
 
         # Sélection des modèles
         if task == "Regression":
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Random Forest", "KNN", "Linear Regression", "SVM"], default=["Linear Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", 'MLP'], default=["Linear Regression"])
         else:
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Random Forest", "KNN", "Logistic Regression", "SVM"], default=["Logistic Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", 'MLP'], default=["Logistic Regression"])
             
         # Sélection du critère de scoring
         metrics_regression = {
@@ -1094,7 +1204,10 @@ if df is not None:
                 "Métrique pour la comparaison des modèles",
                 list(metrics_classification.keys()))
             
-            scoring_comp = metrics_classification[scoring_comp] 
+            scoring_comp = metrics_classification[scoring_comp]
+        
+        if "MLP" in models:
+            onehot = st.sidebar.checkbox("Votre variable cible est-elle catégorielle encodée en Onehot ?", value=False, help="Une variable encodée en Onehot est une variable définie par une liste de 0 et 1")
         
         st.sidebar.subheader("Critères d'évaluation")
 
@@ -1140,6 +1253,7 @@ if df is not None:
             "Logistic Regression": 3,
             "Random Forest": 6,
             "SVM": 7,
+            "MLP": 8
         }
         
         # Paramètres de base
