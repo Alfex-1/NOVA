@@ -451,17 +451,17 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             model = LinearRegression()
         
         elif model_linreg == "ridge":
-            ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, step=0.01)
+            ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, log=True)
             ridge_alpha = round(ridge_alpha, 2)
             model = Ridge(alpha=ridge_alpha)
 
         elif model_linreg == "lasso":
-            lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, step=0.01)
+            lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, log=True)
             lasso_alpha = round(lasso_alpha, 2)
             model = Lasso(alpha=lasso_alpha)
 
         elif model_linreg == "elasticnet":
-            enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, step=0.01)
+            enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, log=True)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
@@ -533,7 +533,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
     
     elif model_type == "SVM":
         # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 0.01, 20.01, step=0.01)
+        C = trial.suggest_float("C", 0.01, 20.01, log=True)
         C = round(C, 2)
         kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
         degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
@@ -551,13 +551,19 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         n_layers = trial.suggest_int("n_layers", 1, 20)
         n_neurons = trial.suggest_int("n_neurons", 1, 501, step=10)
         dropout = trial.suggest_float("dropout", 0, 1, step=0.1)
-        learning_rate = trial.suggest_float("learning_rate", 0.01, 1, step=0.01)
+        learning_rate = trial.suggest_float("learning_rate", 0.00001, 0.01, log=True)
         activation = trial.suggest_categorical("activation", ["relu", "tanh"])
         optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
         initializer = trial.suggest_categorical("initializer", ["glorot_uniform", "he_normal", "lecun_normal"])
         batch_norm = trial.suggest_categorical("batch_norm", [True, False])
-        l1_reg = trial.suggest_float("l1_reg", 0, 1, step=0.01)
-        l2_reg = trial.suggest_float("l2_reg", 0, 1, step=0.01)
+        l1_reg = trial.suggest_float("l1_reg", 0.0, 0.01, log=True)
+        l2_reg = trial.suggest_float("l2_reg", 0.0, 0.01, log=True)
+        
+        # Arrondir les float
+        dropout = round(dropout, 1)
+        learning_rate = round(learning_rate, 5)
+        l1_reg = round(l1_reg, 2)
+        l2_reg = round(l2_reg, 2)
         
         if task == 'Regression':
             if scoring_comp in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"]:
@@ -1263,7 +1269,7 @@ if df is not None:
             "Logistic Regression": 3,
             "Random Forest": 6,
             "SVM": 7,
-            "MLP": 8
+            "MLP": 9
         }
         
         # Paramètres de base
