@@ -548,16 +548,16 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             
     elif model_type == "MLP":
         # Définition des hyperparamètres pour un MLP (keras)
-        n_layers = trial.suggest_int("n_layers", 1, 5)
-        n_neurons = trial.suggest_int("n_neurons", 16, 256, step=16)
-        dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.05)
-        learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-1, log=True)
-        activation = trial.suggest_categorical("activation", ["relu", "tanh", "selu"])
+        n_layers = trial.suggest_int("n_layers", 1, 20)
+        n_neurons = trial.suggest_int("n_neurons", 1, 501, step=10)
+        dropout = trial.suggest_float("dropout", 0, 1, step=0.1)
+        learning_rate = trial.suggest_float("learning_rate", 0.01, 1, step=0.01)
+        activation = trial.suggest_categorical("activation", ["relu", "tanh"])
         optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
         initializer = trial.suggest_categorical("initializer", ["glorot_uniform", "he_normal", "lecun_normal"])
         batch_norm = trial.suggest_categorical("batch_norm", [True, False])
-        l1_reg = trial.suggest_float("l1_reg", 0.0, 1e-2, step=0.001)
-        l2_reg = trial.suggest_float("l2_reg", 0.0, 1e-2, step=0.001)
+        l1_reg = trial.suggest_float("l1_reg", 0, 1, step=0.01)
+        l2_reg = trial.suggest_float("l2_reg", 0, 1, step=0.01)
         
         if task == 'Regression':
             if scoring_comp in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"]:
@@ -566,7 +566,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
                 loss = "mae"
             activation_out="linear"
             neuron_out = 1
-            metric_keras=[tf.keras.metrics.RSquared(), "mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
+            metric_keras=["mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
         else:
             if multi_class:
                 loss = "categorical_crossentropy" if onehot else "sparse_categorical_crossentropy"
