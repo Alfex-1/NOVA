@@ -601,13 +601,10 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         model_class = KerasRegressor if task == "Regression" else KerasClassifier
         model = model_class(model=build_model_mlp, epochs=500, batch_size=32,
                             verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
-    if model_type == "MLP":
-        results = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring_comp)
-        return results
-    else:
-        cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
-        mean_score = cross["test_score"].mean()
-        return mean_score
+    
+    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
+    mean_score = cross["test_score"].mean()
+    return mean_score
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, onehot: bool = False, n_trials: int =70, n_jobs: int =-1):
     study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
@@ -1321,7 +1318,7 @@ if valid_mod:
 
     # Créer un DataFrame à partir des résultats
     df_train = pd.DataFrame(results)        
-    df_train = df_train.set_index(df_train['Model']).drop(columns='Model')
+    df_train.set_index(df_train['Model'], inplace=True)
 
     # Afficher les résultats de la comparaison
     st.subheader("Comparaison et optimisation des modèles")
@@ -1502,8 +1499,8 @@ if valid_mod:
         })
 
     df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
-    df_drift=df_drift.set_index("Feature", inplace=True)
-    df_drift = df_drift[df_drift["Drift détecté"] == True].drop(columns="Drift détecté")
+    df_drift.set_index("Feature", inplace=True)
+    df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
     
     if not df_drift.empty:
         st.dataframe(df_drift)
