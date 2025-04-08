@@ -773,8 +773,18 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
 
             
             model.add(keras.layers.Dense(neuron_out, activation=activation_out))
-            model.add(keras.layers.Dense(len(np.unique(y_train)), activation=activation_out))
-            optimizer = getattr(keras.optimizers, best_params["optimizer_name"].capitalize())(learning_rate=best_params["learning_rate"])
+            
+            optimizers = {
+                "adam": keras.optimizers.Adam(learning_rate=best_params["learning_rate"]),
+                "sgd": keras.optimizers.SGD(learning_rate=best_params["learning_rate"]),
+                "rmsprop": keras.optimizers.RMSprop(learning_rate=best_params["learning_rate"]),
+                "adagrad": keras.optimizers.Adagrad(learning_rate=best_params["learning_rate"]),
+                "adamax": keras.optimizers.Adamax(learning_rate=best_params["learning_rate"]),
+            }
+            
+
+            optimizer = optimizers.get(best_params["optimizer_name"].capitalize())(learning_rate=best_params["learning_rate"])
+            
             model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
             return model
         
@@ -1222,7 +1232,7 @@ if df is not None:
             
             scoring_comp = metrics_classification[scoring_comp]
         
-        if "MLP" in models:
+        if "MLP" in models and task=='Classification':
             onehot = st.sidebar.checkbox("Votre variable cible est-elle catégorielle encodée en Onehot ?", value=False, help="Une variable encodée en Onehot est une variable définie par une liste de 0 et 1")
         
         st.sidebar.subheader("Critères d'évaluation")
