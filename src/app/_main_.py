@@ -451,17 +451,17 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             model = LinearRegression()
         
         elif model_linreg == "ridge":
-            ridge_alpha = trial.suggest_float("ridge_alpha", 1e-3, 10.0, step=0.01)
+            ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, step=0.01)
             ridge_alpha = round(ridge_alpha, 2)
             model = Ridge(alpha=ridge_alpha)
 
         elif model_linreg == "lasso":
-            lasso_alpha = trial.suggest_float("lasso_alpha", 1e-3, 10.0, step=0.01)
+            lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, step=0.01)
             lasso_alpha = round(lasso_alpha, 2)
             model = Lasso(alpha=lasso_alpha)
 
         elif model_linreg == "elasticnet":
-            enet_alpha = trial.suggest_float("enet_alpha", 1e-3, 10.0, step=0.01)
+            enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, step=0.01)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
@@ -610,7 +610,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         # Choix du modèle KerasRegressor ou KerasClassifier selon la tâche
         model_class = KerasRegressor if task == "Regression" else KerasClassifier
         model = model_class(model=build_model_mlp, epochs=500, batch_size=32,
-                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
+                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(monitor=loss, patience=5, restore_best_weights=True)])
     
     cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
     mean_score = cross["test_score"].mean()
