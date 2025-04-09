@@ -550,7 +550,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         n_estimators = trial.suggest_int("n_estimators", 10, 500, step=10)
         max_depth = trial.suggest_int("max_depth", 2, 20)
         learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3, log=True)
-        subsample = trial.suggest_float("subsample", 0.5, 1.1, step=0.1)
+        subsample = trial.suggest_float("subsample", 0.5, 1.0, step=0.1)
         colsample_bytree = trial.suggest_float("colsample_bytree", 0.5, 1.0, step=0.1)
         gamma = trial.suggest_float("gamma", 0.1, 5, log=True)
         reg_alpha = trial.suggest_float("reg_alpha", 0.0001, 10.0, log=True)
@@ -558,8 +558,6 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         
         # Arrondir les float
         learning_rate = round(learning_rate, 8)
-        subsample = round(subsample, 1)
-        colsample_bytree = round(colsample_bytree, 1)
         gamma = round(gamma, 5)
         reg_alpha = round(reg_alpha, 5)
         reg_lambda = round(reg_lambda, 5)
