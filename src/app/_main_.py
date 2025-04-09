@@ -20,9 +20,8 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_validate, learning_curve
 from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
-import tensorflow as tf
-from tensorflow import keras
-from scikeras.wrappers import KerasClassifier, KerasRegressor
+import xgboost as xgb
+from xgboost import XGBClassifier, XGBRegressor
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
@@ -442,7 +441,7 @@ def calculate_inertia(X):
         inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
     return inertias
 
-def objective(trial, task="Classification", model_type="Random Forest", multi_class=False, onehot=False):
+def objective(trial, task="Classification", model_type="Random Forest", multi_class=False):
     if model_type == "Linear Regression":
         # Définition des hyperparamètres pour Linear Regressio,
         model_linreg = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
@@ -546,83 +545,54 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             epsilon = round(epsilon,2)
             model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
             
-    elif model_type == "MLP":
-        # Définition des hyperparamètres pour un MLP (keras)
-        n_layers = trial.suggest_int("n_layers", 1, 20)
-        n_neurons = trial.suggest_int("n_neurons", 1, 501, step=10)
-        dropout = trial.suggest_float("dropout", 0, 0.5, step=0.1)
-        learning_rate = trial.suggest_float("learning_rate", 0.00001, 0.01, log=True)
-        activation = trial.suggest_categorical("activation", ["relu", "tanh"])
-        optimizer_name = trial.suggest_categorical("optimizer_name", ["adam", "sgd", "rmsprop", "adagrad", "adamax"])
-        initializer = trial.suggest_categorical("initializer", ["glorot_uniform", "he_normal", "lecun_normal"])
-        batch_norm = trial.suggest_categorical("batch_norm", [True, False])
-        l1_reg = trial.suggest_float("l1_reg", 0.001, 0.1, log=True)
-        l2_reg = trial.suggest_float("l2_reg", 0.001, 0.1, log=True)
+    elif model_type == "XGBoost":
+        # Définition des hyperparamètres pour un XGBoost
+        n_estimators = trial.suggest_int("n_estimators", 10, 500, step=10)
+        max_depth = trial.suggest_int("max_depth", 2, 20)
+        learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3, log=True)
+        subsample = trial.suggest_float("subsample", 0.5, 1.1, step=0.1)
+        colsample_bytree = trial.suggest_float("colsample_bytree", 0.5, 1.0, step=0.1)
+        gamma = trial.suggest_float("gamma", 0, 5, log=True)
+        reg_alpha = trial.suggest_float("reg_alpha", 0.0001, 10.0, log=True)
+        reg_lambda = trial.suggest_float("reg_lambda", 0.0001, 10.0, log=True)
         
         # Arrondir les float
-        dropout = round(dropout, 1)
-        learning_rate = round(learning_rate, 5)
-        l1_reg = round(l1_reg, 3)
-        l2_reg = round(l2_reg, 3)
+        learning_rate = round(learning_rate, 8)
+        subsample = round(subsample, 1)
+        colsample_bytree = round(colsample_bytree, 1)
+        gamma = round(gamma, 5)
+        reg_alpha = round(reg_alpha, 5)
+        reg_lambda = round(reg_lambda, 5)
         
-        if task == 'Regression':
-            if scoring_comp in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"]:
-                loss = "mse"
-            if scoring_comp in ["neg_mean_absolute_error", "neg_mean_absolute_percentage_error"]:
-                loss = "mae"
-            activation_out="linear"
-            neuron_out = 1
-            metric_keras=["mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
+        if task == "Regression":
+            model = XGBRegressor(
+                n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="reg:squarederror",
+                n_jobs=-1, verbosity=0, random_state=42
+            )
         else:
             if multi_class:
-                loss = "categorical_crossentropy" if onehot else "sparse_categorical_crossentropy"
-                activation_out="softmax"
-                neuron_out = len(np.unique(y_train))
+                num_class = len(np.unique(y_train))
+                model = XGBClassifier(
+                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="multi:softprob",
+                    num_class=num_class, use_label_encoder=False, eval_metric="mlogloss",
+                    n_jobs=-1, verbosity=0)
             else:
-                loss="binary_crossentropy"
-                activation_out="sigmoid"
-                neuron_out = 1
-            
-            metric_keras=["accuracy", tf.keras.metrics.Precision(name="precision"),tf.keras.metrics.Recall(name="recall"), tf.keras.metrics.AUC(name="auc")]
-
-        def build_model_mlp():
-            model = keras.Sequential()
-            regularizer = keras.regularizers.l1_l2(l1=l1_reg, l2=l2_reg)
-            model.add(keras.layers.Input(shape=(X_train.shape[1],)))
-            if batch_norm:
-                model.add(keras.layers.BatchNormalization())
-            for _ in range(n_layers):
-                model.add(keras.layers.Dense(n_neurons, activation=activation,
-                                            kernel_initializer=initializer,
-                                            kernel_regularizer=regularizer))
-                if batch_norm:
-                    model.add(keras.layers.BatchNormalization())
-                model.add(keras.layers.Dropout(dropout))
-            model.add(keras.layers.Dense(neuron_out, activation=activation_out))
-            
-            optimizers = {
-                "adam": keras.optimizers.Adam(learning_rate=learning_rate),
-                "sgd": keras.optimizers.SGD(learning_rate=learning_rate),
-                "rmsprop": keras.optimizers.RMSprop(learning_rate=learning_rate),
-                "adagrad": keras.optimizers.Adagrad(learning_rate=learning_rate),
-                "adamax": keras.optimizers.Adamax(learning_rate=learning_rate),
-            }
-
-            # Vérification de l'optimiseur choisi, avec valeur par défaut "adam"
-            optimizer = optimizers.get(optimizer_name.lower(), keras.optimizers.Adam(learning_rate=learning_rate))
-            model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
-            return model
-
-        # Choix du modèle KerasRegressor ou KerasClassifier selon la tâche
-        model_class = KerasRegressor if task == "Regression" else KerasClassifier
-        model = model_class(model=build_model_mlp, epochs=500, batch_size=32,
-                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(monitor=loss, patience=5, restore_best_weights=True)])
+                model = XGBClassifier(
+                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="binary:logistic",
+                    use_label_encoder=False, eval_metric="logloss", n_jobs=-1,
+                    verbosity=0)
     
     cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
     mean_score = cross["test_score"].mean()
     return mean_score
 
-def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, onehot: bool = False, n_trials: int =70, n_jobs: int =-1):
+def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
     study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
     
     if model_choosen == "Linear Regression":
@@ -630,25 +600,41 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         best_params = study.best_params
         best_value = study.best_value
         
+        # Arrondir les hyperparamètres avant de les utiliser
+        if "ridge_alpha" in best_params:
+            ridge_alpha = round(best_params["ridge_alpha"], 2)
+        if "lasso_alpha" in best_params:
+            lasso_alpha = round(best_params["lasso_alpha"], 2)
+        if "enet_alpha" in best_params:
+            enet_alpha = round(best_params["enet_alpha"], 2)
+        if "l1_ratio" in best_params:
+            l1_ratio = round(best_params["l1_ratio"], 2)
+
+        # Créer le modèle selon le type de régression
         if best_params["model"] == "linear":
             best_model = LinearRegression()
         elif best_params["model"] == "ridge":
-            best_model = Ridge(alpha=best_params["ridge_alpha"])
+            best_model = Ridge(alpha=ridge_alpha)
         elif best_params["model"] == "lasso":
-            best_model = Lasso(alpha=best_params["lasso_alpha"])
+            best_model = Lasso(alpha=lasso_alpha)
         elif best_params["model"] == "elasticnet":
-            best_model = ElasticNet(alpha=best_params["enet_alpha"], l1_ratio=best_params["l1_ratio"])
+            best_model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
 
     elif model_choosen == "Logistic Regression":
         study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
         best_params = study.best_params
         best_value = study.best_value
         
+        # Arrondir les hyperparamètres avant de les utiliser
+        C = round(best_params["C"], 3)
+        
+        if "l1_ratio" in best_params:
+            l1_ratio = round(best_params["l1_ratio"], 2)
+
+        # Création du modèle selon le type de pénalité
         penalty = best_params["penalty"]
-        C = best_params["C"]
         
         if penalty == "elasticnet":
-            l1_ratio = best_params["l1_ratio"]
             best_model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
         elif penalty == "l1":
             solver = "saga" if multi_class else "liblinear"
@@ -718,79 +704,59 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         best_value = study.best_value
         
         # Récupérer les meilleurs paramètres pour SVM
-        C = best_params["C"]
+        C = round(best_params["C"], 2)
         kernel = best_params["kernel"]
         degree = best_params["degree"] if kernel == "poly" else 3
-        gamma = best_params["gamma"]
+        gamma = round(best_params["gamma"], 5)
         
         # Créer le modèle selon la tâche
         if task == "Regression":
-            epsilon = best_params["epsilon"]
+            epsilon = round(best_params["epsilon"],3)
             best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
         else:
             best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
             
-    elif model_choosen == "MLP":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
+    elif model_choosen == "XGBoost":
+        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=100)
         best_params = study.best_params
         best_value = study.best_value
-        
-        def build_best_model():
-            model = keras.Sequential()
-            regularizer = keras.regularizers.l1_l2(l1=best_params["l1_reg"], l2=best_params["l2_reg"])
-            model.add(keras.layers.Input(shape=(X_train.shape[1],)))
-            
-            if best_params["batch_norm"]:
-                model.add(keras.layers.BatchNormalization())
-            for _ in range(best_params["n_layers"]):
-                model.add(keras.layers.Dense(best_params["n_neurons"], activation=best_params["activation"],
-                                             kernel_initializer=best_params["initializer"],
-                                             kernel_regularizer=regularizer))
-                if best_params["batch_norm"]:
-                    model.add(keras.layers.BatchNormalization())
-                model.add(keras.layers.Dropout(best_params["dropout"]))
-            
-            if task == 'Regression':
-                activation_out = "linear"
-                neuron_out=1
-                loss = "mse" if best_params["scoring_comp"] in ["r2", "neg_mean_squared_error", "neg_root_mean_squared_error"] else "mae"
-                metric_keras = [tf.keras.metrics.RSquared(), "mse", tf.keras.metrics.RootMeanSquaredError(), 'mae', 'mape']
+
+        # Récupérer les meilleurs paramètres pour XGBoost
+        n_estimators = best_params["n_estimators"]
+        max_depth = best_params["max_depth"]
+        learning_rate = round(best_params["learning_rate"], 8)
+        subsample = round(best_params["subsample"], 1)
+        colsample_bytree = round(best_params["colsample_bytree"], 1)
+        gamma = round(best_params["gamma"], 5)
+        reg_alpha = round(best_params["reg_alpha"], 5)
+        reg_lambda = round(best_params["reg_lambda"], 5)
+
+        # Créer le modèle selon la tâche
+        if task == "Regression":
+            best_model = XGBRegressor(
+                n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="reg:squarederror",
+                n_jobs=-1, verbosity=0, random_state=42
+            )
+        else:
+            if multi_class:
+                num_class = len(np.unique(y_train))
+                best_model = XGBClassifier(
+                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="multi:softprob",
+                    num_class=num_class, use_label_encoder=False, eval_metric="mlogloss",
+                    n_jobs=-1, verbosity=0, random_state=42
+                )
             else:
-                if multi_class:
-                    if onehot:
-                        loss = "categorical_crossentropy"
-                    else:
-                        loss = "sparse_categorical_crossentropy"
-                    activation_out = "softmax"
-                    neuron_out=len(np.unique(y_train))
-                else:
-                    loss = "binary_crossentropy"
-                    activation_out = "sigmoid"
-                    neuron_out=1
-
-                metric_keras = ["accuracy", tf.keras.metrics.Precision(name="precision"),
-                                tf.keras.metrics.Recall(name="recall"), tf.keras.metrics.AUC(name="auc")]
-
-            
-            model.add(keras.layers.Dense(neuron_out, activation=activation_out))
-            
-            optimizers = {
-                "adam": keras.optimizers.Adam(learning_rate=best_params["learning_rate"]),
-                "sgd": keras.optimizers.SGD(learning_rate=best_params["learning_rate"]),
-                "rmsprop": keras.optimizers.RMSprop(learning_rate=best_params["learning_rate"]),
-                "adagrad": keras.optimizers.Adagrad(learning_rate=best_params["learning_rate"]),
-                "adamax": keras.optimizers.Adamax(learning_rate=best_params["learning_rate"]),
-            }
-            
-
-            optimizer = optimizers.get(best_params["optimizer_name"].capitalize())(learning_rate=best_params["learning_rate"])
-            
-            model.compile(optimizer=optimizer, loss=loss, metrics=metric_keras)
-            return model
-        
-        model_class = KerasRegressor if task == "Regression" else KerasClassifier
-        best_model = model_class(model=build_best_model, epochs=500, batch_size=32,
-                            verbose=0, callbacks=[keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
+                best_model = XGBClassifier(
+                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
+                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="binary:logistic",
+                    use_label_encoder=False, eval_metric="logloss", n_jobs=-1,
+                    verbosity=0, random_state=42
+                )
         
     return best_model, best_params, best_value
 
@@ -1197,9 +1163,9 @@ if df is not None:
 
         # Sélection des modèles
         if task == "Regression":
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", "MLP"], default=["Linear Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", "XGBoost"], default=["Linear Regression"])
         else:
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", "MLP"], default=["Logistic Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", "XGBoost"], default=["Logistic Regression"])
             
         # Sélection du critère de scoring
         metrics_regression = {
@@ -1231,9 +1197,6 @@ if df is not None:
                 list(metrics_classification.keys()))
             
             scoring_comp = metrics_classification[scoring_comp]
-        
-        if "MLP" in models and task=='Classification':
-            onehot = st.sidebar.checkbox("Votre variable cible est-elle catégorielle encodée en Onehot ?", value=False, help="Une variable encodée en Onehot est une variable définie par une liste de 0 et 1")
         
         st.sidebar.subheader("Critères d'évaluation")
 
@@ -1279,7 +1242,7 @@ if df is not None:
             "Logistic Regression": 3,
             "Random Forest": 6,
             "SVM": 7,
-            "MLP": 9
+            "XGBoost": 7
         }
         
         # Paramètres de base
@@ -1344,7 +1307,7 @@ if valid_mod:
 
     # Créer un DataFrame à partir des résultats
     df_train = pd.DataFrame(results)        
-    df_train.set_index(df_train['Model'], inplace=True)
+    df_train.set_index('Model', inplace=True)
 
     # Afficher les résultats de la comparaison
     st.subheader("Comparaison et optimisation des modèles")

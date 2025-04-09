@@ -2,8 +2,8 @@ numpy
 pandas
 matplotlib
 seaborn
-scikit-learn==1.5.2
-tensorflow
+scikit-learn
+xgboost
 scikeras
 optuna
 plotly
