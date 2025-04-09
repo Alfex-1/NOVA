@@ -330,7 +330,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
     
     elif model_type == "Random Forest":
         # Définition des hyperparamètres pour Random Forest
-        n_estimators = trial.suggest_int("n_estimators", 10, 500)
+        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
         max_depth = trial.suggest_int("max_depth", 2, 15)
         min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
         min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 20)
@@ -390,7 +390,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             
     elif model_type == "XGBoost":
         # Définition des hyperparamètres pour un XGBoost
-        n_estimators = trial.suggest_int("n_estimators", 10, 500, step=10)
+        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
         max_depth = trial.suggest_int("max_depth", 2, 20)
         learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3, log=True)
         subsample = trial.suggest_float("subsample", 0.5, 1.0, step=0.1)
@@ -678,8 +678,8 @@ def create_model_from_string(model_str, best_params):
         return None
 
 # df = pd.read_csv(r"C:\Store\Données\boston - Copie.csv", sep=';')
-df = pd.read_csv(r"C:\Store\Données\iris.csv")
-target = "species"
+df = pd.read_csv(r"D:\Compet Kaggle\Predict Podcast Listening Time\train_imputed2 - test.csv", sep=';')
+target = "Listening_Time_minutes"
 use_target = False
 
 if not use_target:
@@ -696,12 +696,12 @@ pca_option = "Nombre de composantes"
 
 
 
-cv = 7
-scoring_comp = "accuracy"
-scoring_eval = ['accuracy','f1_weighted']
-models = ["XGBoost","Random Forest"]
-task = "Classification" # "Classification", "Regression"
-target="species"
+cv = 10
+scoring_comp = "neg_root_mean_squared_error"
+scoring_eval = ['neg_root_mean_squared_error', 'neg_mean_percentage_absolute_error']
+models = ["Linear Regression", "Random Forest", "XGBoost"]
+task = "Regression" # "Classification", "Regression"
+target="Listening_Time_minutes"
 if task == "Classification" and len(df[target].unique()) > 2:
     multi_class = True
 else:
@@ -802,7 +802,7 @@ df = df_scaled.dropna(subset=[target])
 X = df.drop(columns=target)
 y = df[target]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)
 
 # 6. Choisir le meilleur modèle
 results = []
@@ -815,7 +815,7 @@ for model in models:
                                                          cv=cv,
                                                          scoring=scoring_comp,
                                                          multi_class=multi_class,
-                                                         n_trials=5,
+                                                         n_trials=40,
                                                          n_jobs=-1)
     
     # Ajouter les résultats à la liste

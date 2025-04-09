@@ -487,7 +487,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
     
     elif model_type == "Random Forest":
         # Définition des hyperparamètres pour Random Forest
-        n_estimators = trial.suggest_int("n_estimators", 10, 500)
+        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
         max_depth = trial.suggest_int("max_depth", 2, 15)
         min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
         min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 20)
@@ -547,7 +547,7 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             
     elif model_type == "XGBoost":
         # Définition des hyperparamètres pour un XGBoost
-        n_estimators = trial.suggest_int("n_estimators", 10, 500, step=10)
+        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
         max_depth = trial.suggest_int("max_depth", 2, 20)
         learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3, log=True)
         subsample = trial.suggest_float("subsample", 0.5, 1.0, step=0.1)
