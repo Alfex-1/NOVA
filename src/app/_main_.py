@@ -799,6 +799,46 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
     
     return avg_expected_loss, avg_bias, avg_var
 
+def create_xgboost_model(best_params):
+    if task == "Regression":
+        model = XGBRegressor(
+            n_estimators=best_params.get("n_estimators", 100),
+            max_depth=best_params.get("max_depth", 6),
+            learning_rate=best_params.get("learning_rate", 0.1),
+            subsample=best_params.get("subsample", 1),
+            colsample_bytree=best_params.get("colsample_bytree", 1),
+            gamma=best_params.get("gamma", 0),
+            reg_alpha=best_params.get("reg_alpha", 0),
+            reg_lambda=best_params.get("reg_lambda", 1)
+        )
+    else:  # Classification
+        model = XGBClassifier(
+            n_estimators=best_params.get("n_estimators", 100),
+            max_depth=best_params.get("max_depth", 6),
+            learning_rate=best_params.get("learning_rate", 0.1),
+            subsample=best_params.get("subsample", 1),
+            colsample_bytree=best_params.get("colsample_bytree", 1),
+            gamma=best_params.get("gamma", 0),
+            reg_alpha=best_params.get("reg_alpha", 0),
+            reg_lambda=best_params.get("reg_lambda", 1)
+        )
+    
+    return model
+
+def create_model_from_string(model_str, best_params):
+    # Si c'est XGBoost, on utilise notre fonction spécifique
+    if 'XGB' in model_str:
+        return create_xgboost_model(best_params)
+
+    # Sinon, on peut utiliser eval pour les autres modèles
+    try:
+        # Utilisation de eval() pour instancier d'autres modèles (comme RandomForest)
+        model = eval(model_str)
+        return model
+    except Exception as e:
+        print(f"Erreur lors de l'évaluation du modèle {model_str}: {e}")
+        return None
+
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
 
@@ -1357,11 +1397,13 @@ if valid_mod:
     st.subheader("Validation des modèles")
     st.dataframe(df_score2)
     
+    # Mettre en forme exploitables les modèles
+    df_score['Best Model'] = df_score['Best Model'].apply(lambda x: create_model_from_string(x, best_params))
+    
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion
     
     # Vérifier si les modèles sont instanciés ou juste des classes    
     bias_variance_results = []
-    df_score['Best Model'] = df_score['Best Model'].apply(lambda x: eval(x))
     for model in df_score['Best Model']:
             
         expected_loss, bias, var = bias_variance_decomp(
@@ -1393,8 +1435,7 @@ if valid_mod:
     # Matrices de confusion
     if task == 'Classification':
         st.subheader(f"Bilan des Erreurs de Classification")
-        for index, row in df_score.iterrows():
-            model = row['Best Model']
+        for index, model in df_score['Best Model'].items():
             y_pred = model.predict(X_test)
             cm = confusion_matrix(y_test, y_pred)
             
@@ -1418,8 +1459,7 @@ if valid_mod:
     
     # Feature importance
     st.subheader(f"Importance des variables")
-    for index, row in df_score.iterrows():
-            model = row['Best Model']
+    for index, model in df_score['Best Model'].items():
             model.fit(X_train, y_train)
             
             # Calculer l'importance des features par permutation
@@ -1450,9 +1490,7 @@ if valid_mod:
     # Courbes d'apprentissage
     st.subheader(f"Courbes d'apprentissage")
     
-    for index, row in df_score.iterrows():
-        model = row['Best Model']
-        
+    for index, model in df_score['Best Model'].items():        
         train_sizes, train_scores, test_scores = learning_curve(
             model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
@@ -1504,9 +1542,7 @@ if valid_mod:
         os.makedirs(save_dir, exist_ok=True)
         
         # Sauvegarde des modèles
-        for index, row in df_score.iterrows():
-            model_name = index
-            best_model = row['Best Model']
+        for index, model in df_score['Best Model'].items():
             file_path = os.path.join(save_dir, f"{model_name}.pkl")
             with open(file_path, "wb") as f:
                 pickle.dump(best_model, f)
