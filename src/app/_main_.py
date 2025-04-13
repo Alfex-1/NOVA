@@ -1049,9 +1049,9 @@ if df is not None:
 
         # Sélection des modèles
         if task == "Regression":
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", "XGBoost"], default=["Linear Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", "XGBoost", "LightGBM"], default=["Linear Regression"])
         else:
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", "XGBoost"], default=["Logistic Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", "XGBoost", "LightGBM"], default=["Logistic Regression"])
             
         # Sélection du critère de scoring
         metrics_regression = {
