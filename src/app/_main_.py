@@ -558,7 +558,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'algorithm': trial.suggest_categorical('algorithm', ['auto', 'ball_tree', 'kd_tree', 'brute']),
             'leaf_size': trial.suggest_int('leaf_size', 10, 50),
         }
-        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, , n_jobs=-1)
+        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, n_jobs=-1)
 
     # Validation croisée pour évaluer le modèle
     cv_results = cross_validate(model, X, y, cv=cv, scoring=scoring_comp, return_train_score=False)
