@@ -1339,7 +1339,7 @@ if valid_mod:
     st.subheader(f"Courbes d'apprentissage")
     
     for index, mdl in df_score['Best Model'].items(): 
-        model = instance_model(idx, df_train2, task)       
+        model = instance_model(index, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
             model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
