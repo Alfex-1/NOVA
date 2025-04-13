@@ -725,6 +725,7 @@ df = None
 uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
 wrang = st.checkbox("La base de données nécessite un traitement")
 valid_mod=False
+valid_wrang=False
 
 if uploaded_file is not None:
     byte_data = uploaded_file.read()
@@ -877,153 +878,8 @@ if df is not None:
             elif pca_option == "Variance expliquée":
                 explained_variance = st.sidebar.slider("Variance expliquée à conserver (%)", min_value=00, max_value=100, value=95)
         
-        
-        # Appliquer les modifications
-        
-        # 1. Analyser la corrélation des valeurs manquantes
-        if not use_target:
-            df = df.dropna(subset=[target])
-        corr_mat, prop_nan = correlation_missing_values(df)
-
-        # 2. Détecter les outliers
-        df_outliers = detect_outliers_iforest_lof(df, target)
-
-        # 3. Appliquer l'encodage des variables (binaire, ordinal, nominal)
-        if df_cat.shape[1] > 0:
-            df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
-        else:
-            df_encoded = df_outliers.copy()
-            
-        # 4. Imputer les valeurs manquantes
-        df_encoded = df_encoded.dropna(subset=[target])
-        df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
-
-        # 5. Mettre à l'échelle les données
-        if scale_all_data:
-            if scale_method:
-                if scale_method == "Standard Scaler":
-                    scaler = StandardScaler()
-                elif scale_method == "MinMax Scaler":
-                    scaler = MinMaxScaler()
-                elif scale_method == "Robust Scaler":
-                    scaler = RobustScaler()
-                else:
-                    scaler = QuantileTransformer(output_distribution='uniform')
-            
-                
-                if not use_target:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                            columns=df_imputed.drop(columns=target).columns,
-                                            index=df_imputed.index)
-                    df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
-                else:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
-
-            else:
-                st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
-            
-        else:
-            df_scaled = scale_data(df_imputed, list_standard=list_standard, list_minmax=list_minmax, list_robust=list_robust, list_quantile=list_quantile)
-
-        # Appliquer les transformations individuelles
-        if not scale_all_data:
-            df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
-        
-        # Application de l'ACP en fonction du choix de l'utilisateur
-        if use_pca:
-            pca = PCA()
-            if not use_target:
-                df_explicatives = df_scaled.drop(columns=[target])
-                df_target = df_scaled[target]
-            else:
-                df_explicatives = df_scaled.copy()
-                df_target = None
-            
-            # Si l'utilisateur choisit le nombre de composantes
-            if pca_option == "Nombre de composantes":
-                # Ajuster n_components en fonction du nombre de features disponibles
-                n_components = min(n_components, df_explicatives.shape[1])
-                pca = PCA(n_components=n_components)
-                df_pca = pca.fit_transform(df_explicatives)
-            
-            # Si l'utilisateur choisit la variance expliquée
-            elif pca_option == "Variance expliquée":
-                if explained_variance == 100:
-                    # Utilisation de la méthode PCA avec "None" pour récupérer toutes les composantes qui expliquent 100% de la variance
-                    pca = PCA(n_components=None)  
-                else:
-                    pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
-                df_pca = pca.fit_transform(df_explicatives)
-            
-            df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
-            if df_target is not None:
-                df_scaled = pd.concat([df_pca, df_target], axis=1)
-            else:
-                df_scaled = df_pca.copy()
-                
-        if use_pca:   
-            pca_inertias = calculate_inertia(df_explicatives)
-            pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
-            pca_infos=pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
-            pca_infos=pca_infos.reset_index().rename(columns={'index':'Nombre de composantes'})
-            pca_infos['Nombre de composantes'] += 1
-            
-            # Visualisation avec Seaborn
-            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'], 
-                  markers=True, title="Evolution de la variance expliquée par les composantes principales",
-                  labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
-                  color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
-            fig.update_layout(
-                xaxis_title='Nombre de composantes principales',
-                yaxis_title='Variance (%)',
-                legend_title='Type de variance',
-                width=900, height=600
-            )
-        
-        # Finir le traitement
-        wrang_finished = True
-        # Afficher le descriptif de la base de données
-        st.write("### Descriptif de la base de données :")
-        st.write("**Nombre d'observations :**", df_scaled.shape[0])
-        st.write("**Nombre de variables :**", df_scaled.shape[1])
-        if df is not None:
-            description = []
-            for col in df_scaled.columns:
-                if pd.api.types.is_numeric_dtype(df_scaled[col]):
-                    var_type = 'Numérique'
-                    n_modalites = np.nan
-                else:
-                    var_type = 'Catégorielle'
-                    n_modalites = df_scaled[col].nunique()
-                
-                description.append({
-                    'Variable': col,
-                    'Type': var_type,
-                    'Nb modalités': n_modalites
-                })
-            st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
-        
-            if use_pca:
-                st.plotly_chart(fig)
-        
-        # Téléchargement du fichier encodé
-        if df is not None and wrang_finished and not pb:
-            df = df_scaled.copy()
-            csv_buffer = io.StringIO()
-            df.to_csv(csv_buffer, index=False)
-            csv_data = csv_buffer.getvalue()
-            
-            # Afficher l'aperçu des données traitées
-            st.write("### Aperçu des données traitées :")
-            st.dataframe(df_scaled)
-
-            # Afficher le bouton pour télécharger le fichier
-            st.download_button(
-                label="📥 Télécharger les données traitées",
-                data=csv_data,
-                file_name="data.csv",
-                mime="text/csv"
-            )
+        # Valider les choix
+        valid_wrang = st.sidebar.button("Valider les choix de modélisation")
     
     else:
         # Modélisation
@@ -1126,10 +982,10 @@ if df is not None:
             "Linear Regression": 2,
             "KNN": 3,
             "Logistic Regression": 3,
-            "Random Forest": 6,
+            "Random Forest": 8,
             "SVM": 7,
-            "XGBoost": 7
-        }
+            "XGBoost": 7,
+            "LightGBM": 6}
         
         # Paramètres de base
         max_global_trials = 50
@@ -1161,6 +1017,152 @@ if df is not None:
         
         # Valider les choix
         valid_mod = st.sidebar.button("Valider les choix de modélisation")
+
+if valid_wrang:
+    # 1. Analyser la corrélation des valeurs manquantes
+    if not use_target:
+        df = df.dropna(subset=[target])
+    corr_mat, prop_nan = correlation_missing_values(df)
+
+    # 2. Détecter les outliers
+    df_outliers = detect_outliers_iforest_lof(df, target)
+
+    # 3. Appliquer l'encodage des variables (binaire, ordinal, nominal)
+    if df_cat.shape[1] > 0:
+        df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+    else:
+        df_encoded = df_outliers.copy()
+        
+    # 4. Imputer les valeurs manquantes
+    df_encoded = df_encoded.dropna(subset=[target])
+    df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
+
+    # 5. Mettre à l'échelle les données
+    if scale_all_data:
+        if scale_method:
+            if scale_method == "Standard Scaler":
+                scaler = StandardScaler()
+            elif scale_method == "MinMax Scaler":
+                scaler = MinMaxScaler()
+            elif scale_method == "Robust Scaler":
+                scaler = RobustScaler()
+            else:
+                scaler = QuantileTransformer(output_distribution='uniform')
+        
+            
+            if not use_target:
+                df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
+                                        columns=df_imputed.drop(columns=target).columns,
+                                        index=df_imputed.index)
+                df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
+            else:
+                df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
+
+        else:
+            st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
+        
+    else:
+        df_scaled = scale_data(df_imputed, list_standard=list_standard, list_minmax=list_minmax, list_robust=list_robust, list_quantile=list_quantile)
+
+    # Appliquer les transformations individuelles
+    if not scale_all_data:
+        df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+    
+    # Application de l'ACP en fonction du choix de l'utilisateur
+    if use_pca:
+        pca = PCA()
+        if not use_target:
+            df_explicatives = df_scaled.drop(columns=[target])
+            df_target = df_scaled[target]
+        else:
+            df_explicatives = df_scaled.copy()
+            df_target = None
+        
+        # Si l'utilisateur choisit le nombre de composantes
+        if pca_option == "Nombre de composantes":
+            # Ajuster n_components en fonction du nombre de features disponibles
+            n_components = min(n_components, df_explicatives.shape[1])
+            pca = PCA(n_components=n_components)
+            df_pca = pca.fit_transform(df_explicatives)
+        
+        # Si l'utilisateur choisit la variance expliquée
+        elif pca_option == "Variance expliquée":
+            if explained_variance == 100:
+                # Utilisation de la méthode PCA avec "None" pour récupérer toutes les composantes qui expliquent 100% de la variance
+                pca = PCA(n_components=None)  
+            else:
+                pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+            df_pca = pca.fit_transform(df_explicatives)
+        
+        df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
+        if df_target is not None:
+            df_scaled = pd.concat([df_pca, df_target], axis=1)
+        else:
+            df_scaled = df_pca.copy()
+            
+    if use_pca:   
+        pca_inertias = calculate_inertia(df_explicatives)
+        pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+        pca_infos=pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+        pca_infos=pca_infos.reset_index().rename(columns={'index':'Nombre de composantes'})
+        pca_infos['Nombre de composantes'] += 1
+        
+        # Visualisation avec Seaborn
+        fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'], 
+                markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+        fig.update_layout(
+            xaxis_title='Nombre de composantes principales',
+            yaxis_title='Variance (%)',
+            legend_title='Type de variance',
+            width=900, height=600
+        )
+    
+    # Finir le traitement
+    wrang_finished = True
+    # Afficher le descriptif de la base de données
+    st.write("### Descriptif de la base de données :")
+    st.write("**Nombre d'observations :**", df_scaled.shape[0])
+    st.write("**Nombre de variables :**", df_scaled.shape[1])
+    if df is not None:
+        description = []
+        for col in df_scaled.columns:
+            if pd.api.types.is_numeric_dtype(df_scaled[col]):
+                var_type = 'Numérique'
+                n_modalites = np.nan
+            else:
+                var_type = 'Catégorielle'
+                n_modalites = df_scaled[col].nunique()
+            
+            description.append({
+                'Variable': col,
+                'Type': var_type,
+                'Nb modalités': n_modalites
+            })
+        st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
+    
+        if use_pca:
+            st.plotly_chart(fig)
+    
+    # Téléchargement du fichier encodé
+    if df is not None and wrang_finished and not pb:
+        df = df_scaled.copy()
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+        
+        # Afficher l'aperçu des données traitées
+        st.write("### Aperçu des données traitées :")
+        st.dataframe(df_scaled)
+
+        # Afficher le bouton pour télécharger le fichier
+        st.download_button(
+            label="📥 Télécharger les données traitées",
+            data=csv_data,
+            file_name="data.csv",
+            mime="text/csv"
+        )
         
 if valid_mod:
     # Effectuer la modélisation
