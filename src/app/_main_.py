@@ -600,10 +600,10 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
+def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
     # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
     rng = np.random.RandomState(random_seed)
-    kf = KFold(n_splits=num_rounds, shuffle=True, random_state=rng)
+    kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
 
     all_pred = []
     y_tests = []
@@ -1251,7 +1251,7 @@ if valid_mod:
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         expected_loss, bias, var = bias_variance_decomp(
-            model,
+            model, task=task,
             X=X_train.values, y=y_train.values,
             num_rounds=cv)
 
