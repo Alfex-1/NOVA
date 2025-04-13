@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
-import plotly.express as px
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
@@ -16,17 +15,13 @@ from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighbo
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_validate, learning_curve
-from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
-from xgboost import XGBClassifier, XGBRegressor
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import HyperbandPruner
 from sklearn.metrics import confusion_matrix
-import io
-from io import BytesIO
-import os
+import lightgbm as lgb
 
 def correlation_missing_values(df: pd.DataFrame):
     """
@@ -284,9 +279,77 @@ def calculate_inertia(X):
         inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
     return inertias
 
-def objective(trial, task="Classification", model_type="Random Forest", multi_class=False):
-    if model_type == "Linear Regression":
-        # Définition des hyperparamètres pour Linear Regressio,
+def objective(trial, task="regression", model_type="Random Forest", multi_class=False, X=None, y=None, cv=5, scoring_comp='neg_root_mean_squared_error'):
+    # Paramètres d'optimisation selon le type de modèle
+    if model_type == "LightGBM":
+        param = {
+            'objective': 'regression' if task == 'Regression' else 'binary' if task == 'Classification' else 'multiclass',
+            'metric': 'rmse' if task == 'Regression' else 'binary_logloss' if task == 'Classification' else 'multi_logloss',
+            'num_leaves': trial.suggest_int('num_leaves', 31, 255),
+            'max_depth': trial.suggest_int('max_depth', 2, 15),
+            'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.1, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 600),
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0, step=0.01),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0, step=0.01),
+        }
+        model = lgb.LGBMRegressor(**param, verbose=-1) if task == 'Regression' else lgb.LGBMClassifier(**param, verbose=-1)
+
+    elif model_type == "XGBoost":
+        # Déterminer l'objectif et les métriques selon la tâche
+        if task == 'Regression':
+            objective = 'reg:squarederror'
+            eval_metric = 'rmse'
+        elif task == 'Classification':
+            objective = 'binary:logistic'  # pour la classification binaire
+            eval_metric = 'logloss'
+            num_class = 1  # binaire, pas nécessaire de définir num_class ici
+        else:  # pour la classification multiclasse
+            objective = 'multi:softmax'
+            eval_metric = 'mlogloss'
+            num_class = len(y_train.unique())  # Nombre de classes unique dans la variable cible
+
+        # Hyperparamètres à optimiser
+        param = {
+            'objective': objective,
+            'eval_metric': eval_metric,
+            'max_depth': trial.suggest_int('max_depth', 2, 15),
+            'learning_rate': trial.suggest_float('learning_rate', 0.001, 0.1, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 600),
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0, step=0.01),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0, step=0.01),
+        }
+
+        # Ajouter le paramètre num_class pour la classification multiclasse
+        if task == 'Classification' and objective == 'multi:softmax':
+            param['num_class'] = num_class
+
+        # Créer le modèle avec les meilleurs paramètres
+        if task == 'Regression':
+            model = xgb.XGBRegressor(**param)
+        else:
+            model = xgb.XGBClassifier(**param)
+
+    elif model_type == "Random Forest":
+        param = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 500),
+            'max_depth': trial.suggest_int('max_depth', 5, 50),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
+            'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
+            'max_features': trial.suggest_categorical('max_features', [None, 'sqrt', 'log2'])
+        }
+        model = RandomForestRegressor(**param) if task == 'Regression' else RandomForestClassifier(**param)
+
+    elif model_type == "SVM":
+        param = {
+            'C': trial.suggest_float('C', 0.1, 10.0, log=True),
+            'kernel': trial.suggest_categorical('kernel', ['linear', 'poly', 'rbf', 'sigmoid']),
+            'gamma': trial.suggest_categorical('gamma', ['scale', 'auto']),
+            'degree': trial.suggest_int('degree', 2, 5),
+        }
+        model = SVC(**param) if task == 'Classification' else SVR(**param)
+
+    elif model_type == "Linear Regression":
+        # Définition des hyperparamètres pour la régression linéaire et les modèles régularisés
         model_linreg = trial.suggest_categorical("model", ["linear", "ridge", "lasso", "elasticnet"])
     
         if model_linreg == "linear":
@@ -308,8 +371,9 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
             model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
-    
+
     elif model_type == "Logistic Regression":
+        # Paramètres pour la régression logistique
         penalty = trial.suggest_categorical("penalty", ["l2", "l1", "elasticnet", None])
         C = trial.suggest_float("C", 1e-3, 10.001, step=0.01)
         C = round(C, 3)
@@ -327,275 +391,55 @@ def objective(trial, task="Classification", model_type="Random Forest", multi_cl
         else:
             solver = "saga" if multi_class else "lbfgs"
             model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
-    
-    elif model_type == "Random Forest":
-        # Définition des hyperparamètres pour Random Forest
-        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
-        max_depth = trial.suggest_int("max_depth", 2, 15)
-        min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
-        min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 20)
-        max_features = trial.suggest_categorical("max_features", ["sqrt", "log2", None])
-        bootstrap = trial.suggest_categorical("bootstrap", [True, False])
-        
-        if task == "Classification":
-            model = RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                min_samples_leaf=min_samples_leaf,
-                max_features=max_features,
-                bootstrap=bootstrap)
-        else:
-            model = RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                min_samples_leaf=min_samples_leaf,
-                max_features=max_features,
-                bootstrap=bootstrap)
-    
+
+
     elif model_type == "KNN":
-        # Définition des hyperparamètres pour KNN
-        n_neighbors = trial.suggest_int("n_neighbors", 1, 50)
-        weights = trial.suggest_categorical("weights", ["uniform", "distance"])
-        metric = trial.suggest_categorical("metric", ["euclidean", "manhattan", "minkowski"])
-        
-        if task == "Classification":
-            model = KNeighborsClassifier(
-                n_neighbors=n_neighbors,
-                weights=weights,
-                metric=metric
-            )
-        else:
-            model = KNeighborsRegressor(
-                n_neighbors=n_neighbors,
-                weights=weights,
-                metric=metric
-            )
+        param = {
+            'n_neighbors': trial.suggest_int('n_neighbors', 3, 50),
+            'weights': trial.suggest_categorical('weights', ['uniform', 'distance']),
+            'algorithm': trial.suggest_categorical('algorithm', ['auto', 'ball_tree', 'kd_tree', 'brute']),
+            'leaf_size': trial.suggest_int('leaf_size', 10, 50),
+        }
+        model = KNeighborsRegressor(**param) if task == 'Regression' else KNeighborsClassifier(**param)
+
+    # Validation croisée pour évaluer le modèle
+    cv_results = cross_validate(model, X, y, cv=cv, scoring=scoring_comp, return_train_score=False)
+
+    # Retourner la performance (ici on maximise la précision, mais à ajuster selon le modèle)
+    return np.mean(cv_results['test_score'])
+
+def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_quared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
+    study = optuna.create_study(direction='maximize', sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
+    study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen, multi_class=multi_class, X=X_train, y=y_train, cv=cv, scoring_comp=scoring), n_trials=n_trials, n_jobs=n_jobs)
     
-    elif model_type == "SVM":
-        # Définition des hyperparamètres pour SVM
-        C = trial.suggest_float("C", 0.01, 20.01, log=True)
-        C = round(C, 2)
-        kernel = trial.suggest_categorical("kernel", ["linear", "poly", "rbf", "sigmoid"])
-        degree = trial.suggest_int("degree", 2, 5) if kernel == "poly" else 3
-        gamma = trial.suggest_categorical("gamma", ["scale", "auto"])
-        
-        if task == "Classification":
-            model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
-        else:
-            epsilon = trial.suggest_float("epsilon", 0.01, 1.0, step=0.01)
-            epsilon = round(epsilon,2)
-            model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
-            
-    elif model_type == "XGBoost":
-        # Définition des hyperparamètres pour un XGBoost
-        n_estimators = trial.suggest_int("n_estimators", 10, 300, step=20)
-        max_depth = trial.suggest_int("max_depth", 2, 20)
-        learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3, log=True)
-        subsample = trial.suggest_float("subsample", 0.5, 1.0, step=0.1)
-        colsample_bytree = trial.suggest_float("colsample_bytree", 0.5, 1.0, step=0.1)
-        gamma = trial.suggest_float("gamma", 0.1, 5, log=True)
-        reg_alpha = trial.suggest_float("reg_alpha", 0.0001, 10.0, log=True)
-        reg_lambda = trial.suggest_float("reg_lambda", 0.0001, 10.0, log=True)
-        
-        # Arrondir les float
-        learning_rate = round(learning_rate, 8)
-        gamma = round(gamma, 5)
-        reg_alpha = round(reg_alpha, 5)
-        reg_lambda = round(reg_lambda, 5)
-        
-        if task == "Regression":
-            model = XGBRegressor(
-                n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="reg:squarederror",
-                n_jobs=-1, verbosity=0, random_state=42
-            )
-        else:
-            if multi_class:
-                num_class = len(np.unique(y_train))
-                model = XGBClassifier(
-                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="multi:softprob",
-                    num_class=num_class, use_label_encoder=False, eval_metric="mlogloss",
-                    n_jobs=-1, verbosity=0)
-            else:
-                model = XGBClassifier(
-                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="binary:logistic",
-                    use_label_encoder=False, eval_metric="logloss", n_jobs=-1,
-                    verbosity=0)
-    
-    cross = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring_comp, n_jobs=1)
-    mean_score = cross["test_score"].mean()
-    return mean_score
-
-def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int =10, scoring: str="neg_root_mean_quared_error", multi_class: bool = False, n_trials: int =70, n_jobs: int =-1):
-    study = optuna.create_study(direction="maximize", sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
-    
-    if model_choosen == "Linear Regression":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
-        best_params = study.best_params
-        best_value = study.best_value
-        
-        # Arrondir les hyperparamètres avant de les utiliser
-        if "ridge_alpha" in best_params:
-            ridge_alpha = round(best_params["ridge_alpha"], 2)
-        if "lasso_alpha" in best_params:
-            lasso_alpha = round(best_params["lasso_alpha"], 2)
-        if "enet_alpha" in best_params:
-            enet_alpha = round(best_params["enet_alpha"], 2)
-        if "l1_ratio" in best_params:
-            l1_ratio = round(best_params["l1_ratio"], 2)
-
-        # Créer le modèle selon le type de régression
-        if best_params["model"] == "linear":
-            best_model = LinearRegression()
-        elif best_params["model"] == "ridge":
-            best_model = Ridge(alpha=ridge_alpha)
-        elif best_params["model"] == "lasso":
-            best_model = Lasso(alpha=lasso_alpha)
-        elif best_params["model"] == "elasticnet":
-            best_model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
-
-    elif model_choosen == "Logistic Regression":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
-        best_params = study.best_params
-        best_value = study.best_value
-        
-        # Arrondir les hyperparamètres avant de les utiliser
-        C = round(best_params["C"], 3)
-        
-        if "l1_ratio" in best_params:
-            l1_ratio = round(best_params["l1_ratio"], 2)
-
-        # Création du modèle selon le type de pénalité
-        penalty = best_params["penalty"]
-        
-        if penalty == "elasticnet":
-            best_model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
-        elif penalty == "l1":
-            solver = "saga" if multi_class else "liblinear"
-            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
-        elif penalty == "l2":
-            solver = "saga" if multi_class else "lbfgs"
-            best_model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
-        else:
-            solver = "saga" if multi_class else "lbfgs"
-            best_model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
-
-    elif model_choosen == "Random Forest":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=150)
-        best_params = study.best_params
-        best_value = study.best_value
-        
-        n_estimators = best_params["n_estimators"]
-        max_depth = best_params["max_depth"]
-        min_samples_split = best_params["min_samples_split"]
-        min_samples_leaf = best_params["min_samples_leaf"]
-        max_features = best_params["max_features"]
-        bootstrap = best_params["bootstrap"]
-        
-        if task == "Regression":
-            best_model = RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                min_samples_leaf=min_samples_leaf,
-                max_features=max_features,
-                bootstrap=bootstrap)
-        else:
-            best_model = RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                min_samples_leaf=min_samples_leaf,
-                max_features=max_features,
-                bootstrap=bootstrap)
-    elif model_choosen == "KNN":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=80)
-        best_params = study.best_params
-        best_value = study.best_value
-        
-        # Récupérer les meilleurs paramètres pour KNN
-        n_neighbors = best_params["n_neighbors"]
-        weights = best_params["weights"]
-        metric = best_params["metric"]
-        
-        # Créer le modèle selon la tâche
-        if task == "Regression":
-            best_model = KNeighborsRegressor(
-                n_neighbors=n_neighbors,
-                weights=weights,
-                metric=metric
-            )
-        else:
-            best_model = KNeighborsClassifier(
-                n_neighbors=n_neighbors,
-                weights=weights,
-                metric=metric
-            )
-
-    elif model_choosen == "SVM":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=100)
-        best_params = study.best_params
-        best_value = study.best_value
-        
-        # Récupérer les meilleurs paramètres pour SVM
-        C = round(best_params["C"], 2)
-        kernel = best_params["kernel"]
-        degree = best_params["degree"] if kernel == "poly" else 3
-        gamma = round(best_params["gamma"], 5)
-        
-        # Créer le modèle selon la tâche
-        if task == "Regression":
-            epsilon = round(best_params["epsilon"],3)
-            best_model = SVR(C=C, kernel=kernel, degree=degree, gamma=gamma, epsilon=epsilon)
-        else:
-            best_model = SVC(C=C, kernel=kernel, degree=degree, gamma=gamma)
-            
+    # Créer le modèle avec les meilleurs hyperparamètres
+    if model_choosen == "LightGBM":
+        best_model = lgb.LGBMRegressor(**study.best_params, verbose=-1) if task == 'Regression' else lgb.LGBMClassifier(**study.best_params, verbose=-1)
     elif model_choosen == "XGBoost":
-        study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen), n_trials=n_trials, n_jobs=n_jobs, timeout=100)
-        best_params = study.best_params
-        best_value = study.best_value
-
-        # Récupérer les meilleurs paramètres pour XGBoost
-        n_estimators = best_params["n_estimators"]
-        max_depth = best_params["max_depth"]
-        learning_rate = round(best_params["learning_rate"], 8)
-        subsample = round(best_params["subsample"], 1)
-        colsample_bytree = round(best_params["colsample_bytree"], 1)
-        gamma = round(best_params["gamma"], 5)
-        reg_alpha = round(best_params["reg_alpha"], 5)
-        reg_lambda = round(best_params["reg_lambda"], 5)
-
-        # Créer le modèle selon la tâche
-        if task == "Regression":
-            best_model = XGBRegressor(
-                n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="reg:squarederror",
-                n_jobs=-1, verbosity=0)
-        else:
-            if multi_class:
-                num_class = len(np.unique(y_train))
-                best_model = XGBClassifier(
-                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="multi:softprob",
-                    num_class=num_class, use_label_encoder=False, eval_metric="mlogloss",
-                    n_jobs=-1, verbosity=0)
-            else:
-                best_model = XGBClassifier(
-                    n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                    subsample=subsample, colsample_bytree=colsample_bytree, gamma=gamma,
-                    reg_alpha=reg_alpha, reg_lambda=reg_lambda, objective="binary:logistic",
-                    use_label_encoder=False, eval_metric="logloss", n_jobs=-1,
-                    verbosity=0)
-        
+        best_model = xgb.XGBRegressor(**study.best_params) if task == 'Regression' else xgb.XGBClassifier(**study.best_params)
+    elif model_choosen == "Random Forest":
+        best_model = RandomForestRegressor(**study.best_params) if task == 'Regression' else RandomForestClassifier(**study.best_params)
+    elif model_choosen == "SVM":
+        best_model = SVR(**study.best_params) if task == 'Regression' else SVC(**study.best_params)
+    elif model_choosen == "Linear Regression":
+        # Gestion des régressions linéaires et régularisées
+        if "model" in study.best_params and study.best_params["model"] == "linear":
+            best_model = LinearRegression()
+        elif "model" in study.best_params and study.best_params["model"] == "ridge":
+            best_model = Ridge(alpha=study.best_params["ridge_alpha"])
+        elif "model" in study.best_params and study.best_params["model"] == "lasso":
+            best_model = Lasso(alpha=study.best_params["lasso_alpha"])
+        elif "model" in study.best_params and study.best_params["model"] == "elasticnet":
+            best_model = ElasticNet(alpha=study.best_params["enet_alpha"], l1_ratio=study.best_params["l1_ratio"])
+    elif model_choosen == "Logistic Regression":
+        best_model = LogisticRegression(**study.best_params, max_iter=10000, n_jobs=-1)
+    elif model_choosen == "KNN":
+        best_model = KNeighborsRegressor(**study.best_params) if task == 'Regression' else KNeighborsClassifier(**study.best_params)
+    
+    # Retourner le modèle avec les meilleurs hyperparamètres et les résultats
+    best_params = study.best_params
+    best_value = study.best_value
+    
     return best_model, best_params, best_value
 
 def _draw_bootstrap_sample(rng, X, y):
@@ -637,60 +481,78 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
     
     return avg_expected_loss, avg_bias, avg_var
 
-def create_xgboost_model(best_params):
-    if task == "Regression":
-        model = XGBRegressor(
-            n_estimators=best_params.get("n_estimators", 100),
-            max_depth=best_params.get("max_depth", 6),
-            learning_rate=best_params.get("learning_rate", 0.1),
-            subsample=best_params.get("subsample", 1),
-            colsample_bytree=best_params.get("colsample_bytree", 1),
-            gamma=best_params.get("gamma", 0),
-            reg_alpha=best_params.get("reg_alpha", 0),
-            reg_lambda=best_params.get("reg_lambda", 1)
-        )
-    else:  # Classification
-        model = XGBClassifier(
-            n_estimators=best_params.get("n_estimators", 100),
-            max_depth=best_params.get("max_depth", 6),
-            learning_rate=best_params.get("learning_rate", 0.1),
-            subsample=best_params.get("subsample", 1),
-            colsample_bytree=best_params.get("colsample_bytree", 1),
-            gamma=best_params.get("gamma", 0),
-            reg_alpha=best_params.get("reg_alpha", 0),
-            reg_lambda=best_params.get("reg_lambda", 1)
-        )
+def instance_model(index, df, task):
+    # Récupérer le nom du modèle depuis df_train
+    model_name = index
+    
+    # Récupérer les hyperparamètres pour ce modèle
+    best_params = df.loc[index, 'Best Params']
+    
+    # Déterminer l'instance du modèle selon le nom et la tâche (Classification ou Regression)
+    if model_name == 'KNN':
+        if task == 'Classification':
+            model = KNeighborsClassifier(**best_params)  # KNNClassifier
+        else:
+            model = KNeighborsRegressor(**best_params)  # KNNRegressor
+            
+    elif model_name == 'LightGBM':
+        if task == 'Classification':
+            model = lgb.LGBMClassifier(**best_params)  # LGBMClassifier
+        else:
+            model = lgb.LGBMRegressor(**best_params)  # LGBMRegressor
+            
+    elif model_name == 'XGBoost':
+        if task == 'Classification':
+            model = xgb.XGBClassifier(**best_params)  # XGBClassifier
+        else:
+            model = xgb.XGBRegressor(**best_params)  # XGBRegressor
+            
+    elif model_name == 'Random Forest':
+        if task == 'Classification':
+            model = RandomForestClassifier(**best_params)  # RandomForestClassifier
+        else:
+            model = RandomForestRegressor(**best_params)  # RandomForestRegressor
+            
+    elif model_name == 'Linear Regression':
+        type_model_reg = best_params.get('model')
+        
+        if type_model_reg == 'linear':
+            model = LinearRegression()
+        elif type_model_reg == 'ridge': 
+            alpha = best_params.get('ridge_alpha')
+            model = Ridge(alpha=alpha)
+        elif type_model_reg == 'lasso':
+            alpha = best_params.get('lasso_alpha')
+            model = Lasso(alpha=alpha)
+        elif type_model_reg == 'elasticnet':
+            alpha = best_params.get('elasticnet_alpha')
+            l1_ratio = best_params.get('l1_ratio')
+            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
+        
+    elif model_name == 'Logistic Regression':
+        model = LogisticRegression(*best_params)
+           
+    elif model_name == 'SVM':
+        if task == 'Classification':
+            model = SVC(**best_params)  # SVC pour classification
+        else:
+            model = SVR(**best_params)  # SVR pour régression
     
     return model
 
-def create_model_from_string(model_str, best_params):
-    # Si c'est XGBoost, on utilise notre fonction spécifique
-    if 'XGB' in model_str:
-        return create_xgboost_model(best_params)
-
-    # Sinon, on peut utiliser eval pour les autres modèles
-    try:
-        # Utilisation de eval() pour instancier d'autres modèles (comme RandomForest)
-        model = eval(model_str)
-        return model
-    except Exception as e:
-        print(f"Erreur lors de l'évaluation du modèle {model_str}: {e}")
-        return None
-
-# df = pd.read_csv(r"C:\Store\Données\boston - Copie.csv", sep=';')
-df = pd.read_csv(r"D:\Compet Kaggle\Predict Podcast Listening Time\train_imputed2 - test.csv", sep=';')
-target = "Listening_Time_minutes"
+df = pd.read_csv(r"C:\Store\Données\boston.csv", sep=';')
+target = "MEDV"
 use_target = False
 
 if not use_target:
     df_copy=df.copy().drop(columns=target)
 
 scale_all_data = True
-scale_method = "Standard Scaler"
+scale_method = "Robust Scaler"
 
 df_cat = df.select_dtypes(exclude=['number'])
 
-use_pca = True
+use_pca = False
 n_components = 15
 pca_option = "Nombre de composantes"
 
@@ -698,10 +560,9 @@ pca_option = "Nombre de composantes"
 
 cv = 10
 scoring_comp = "neg_root_mean_squared_error"
-scoring_eval = ['neg_root_mean_squared_error', 'neg_mean_percentage_absolute_error']
-models = ["Linear Regression", "Random Forest", "XGBoost"]
+scoring_eval = ['neg_root_mean_squared_error']
+models = ["Linear Regression"]
 task = "Regression" # "Classification", "Regression"
-target="Listening_Time_minutes"
 if task == "Classification" and len(df[target].unique()) > 2:
     multi_class = True
 else:
@@ -808,15 +669,11 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle
 results = []
 for model in models:  
     # Déterminer chaque modèle à optimiser
-    best_model, best_params, best_value = optimize_model(model_choosen=model,
-                                                         task=task,
-                                                         X_train=X_train,
-                                                         y_train=y_train,
-                                                         cv=cv,
-                                                         scoring=scoring_comp,
+    best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
+                                                         X_train=X_train, y_train=y_train,
+                                                         cv=cv, scoring=scoring_comp,
                                                          multi_class=multi_class,
-                                                         n_trials=40,
-                                                         n_jobs=-1)
+                                                         n_trials=100, n_jobs=-1)
     
     # Ajouter les résultats à la liste
     results.append({
@@ -825,10 +682,10 @@ for model in models:
         'Best Params': best_params})
 
 # Créer un DataFrame à partir des résultats
-df_train = pd.DataFrame(results)        
-df_train.set_index('Model', inplace=True)
+df_train = pd.DataFrame(results)
 
-df_train2 = df_train.copy()
+df_train2=df_train.copy()        
+df_train2.set_index('Model', inplace=True)
 df_train2["Best Model"] = df_train2["Best Model"].astype(str)
 print(df_train2)
 
@@ -837,7 +694,7 @@ list_models = df_train['Best Model'].tolist()
 
 list_score = []
 for model in list_models:  # Utilise les vrais objets modèles
-    scores = cross_validate(model, X, y, cv=cv, scoring=scoring_eval, n_jobs=-1)
+    scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
     mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
     std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
 
@@ -884,21 +741,19 @@ for metric in scoring_eval:
 
 # Derniers traitement
 df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-df_score.index = df_train.index
+df_score.index = df_train2.index
 df_score2 = df_score.drop(columns='Best Model')
 print(df_score2)
 
-# Mettre en forme exploitables les modèles
-df_score['Best Model'] = df_score['Best Model'].apply(lambda x: create_model_from_string(x, best_params))
-
 # 8. Calculer le biais et la variance
 bias_variance_results = []
-for model in df_score['Best Model']:
+for idx, best_model in df_score['Best Model'].items():
+    model = instance_model(idx, df_train2, task)
     expected_loss, bias, var = bias_variance_decomp(
         model,
         X_train.values, y_train.values,
         X_test.values, y_test.values,
-        loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=10,
+        loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=20,
         random_seed=123)
 
     if task == 'Classification':
@@ -914,7 +769,7 @@ for model in df_score['Best Model']:
     
 # Création du DataFrame
 df_bias_variance = pd.DataFrame(bias_variance_results)
-df_bias_variance.index = df_train.index
+df_bias_variance.index = df_train2.index
 print(df_bias_variance)
 
 # 9. Afficher la matrice de confusion  
@@ -950,3 +805,74 @@ if task=='Classification':
             plt.xlabel('Predicted')
             plt.ylabel('True')
             plt.show()
+            
+# Feature importance
+for index, mdl in df_score['Best Model'].items():
+    model = instance_model(idx, df_train2, task)
+    
+    # Calculer l'importance des features par permutation
+    result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
+
+    # Extraire l'importance moyenne des features
+    importances = result.importances_mean
+    std_importances = result.importances_std
+
+    # Trier les importances par ordre décroissant
+    sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
+
+    # Trier les valeurs d'importance et les noms des features
+    sorted_importances = importances[sorted_idx]
+    sorted_std_importances = std_importances[sorted_idx]
+    sorted_features = X_train.columns[sorted_idx]
+
+    # Créer le graphique
+    plt.figure(figsize=(5, 3))
+    plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
+    plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
+    plt.xticks(fontsize=6)
+    plt.xlabel("Importance", fontsize=7)
+    plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
+    plt.gca().invert_yaxis()
+    plt.show()
+        
+# Courbes d'apprentissage
+for index, mdl in df_score['Best Model'].items(): 
+    model = instance_model(idx, df_train2, task)       
+    train_sizes, train_scores, test_scores = learning_curve(
+        model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
+        train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
+    )
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+
+    plt.figure(figsize=(5, 3))
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
+    plt.title(f"Learning Curve - {index}", fontsize=8)
+    plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
+    plt.ylabel("Score", fontsize=7)
+    plt.legend(loc="best", fontsize=6)
+    plt.xticks(fontsize=6)
+    plt.yticks(fontsize=6)
+    plt.show()
+    
+# Analyse de drift
+drift_results = []
+for col in X.columns:
+    stat, p_value = ks_2samp(X_train[col], X_test[col])
+    drift_results.append({
+        "Feature": col,
+        "KS Statistic": round(stat, 4),
+        "p-value": round(p_value, 4),
+        "Drift détecté": "Oui" if p_value < 0.05 else "Non"
+    })
+
+df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
+df_drift.set_index("Feature", inplace=True)
+df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
+
+if not df_drift.empty:
+    print(df_drift)
+else:
+    print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")
