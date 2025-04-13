@@ -1198,7 +1198,7 @@ if valid_mod:
 
     list_score = []
     for model in list_models:  # Utilise les vrais objets modèles
-        scores = cross_validate(model, X, y, cv=cv, scoring=scoring_eval, n_jobs=-1)
+        scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
         mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
         std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
 
@@ -1208,8 +1208,24 @@ if valid_mod:
             'Std Scores': std_scores
         })
 
-    df_score = pd.DataFrame(list_score)
-    
+    df_score = pd.DataFrame(list_score)  
+
+    # Dictionnaires des métriques
+    metrics_regression = {
+        "R² Score": "r2",
+        "Mean Squared Error": "neg_mean_squared_error",
+        "Root Mean Squared Error": "neg_root_mean_squared_error",
+        "Mean Absolute Error": "neg_mean_absolute_error",
+        "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
+    }
+
+    metrics_classification = {
+        "Accuracy": "accuracy",
+        "F1 Score (Weighted)": "f1_weighted",
+        "Precision (Weighted)": "precision_weighted",
+        "Recall (Weighted)": "recall_weighted"
+    }
+
     # Inverser les dictionnaires des métriques
     inv_metrics_regression = {v: k for k, v in metrics_regression.items()}
     inv_metrics_classification = {v: k for k, v in metrics_classification.items()}
@@ -1229,7 +1245,7 @@ if valid_mod:
 
     # Derniers traitement
     df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-    df_score.index = df_train.index
+    df_score.index = df_train2.index
     df_score2 = df_score.drop(columns='Best Model')
     st.subheader("Validation des modèles")
     st.dataframe(df_score2)
@@ -1238,12 +1254,11 @@ if valid_mod:
     bias_variance_results = []
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
-            
         expected_loss, bias, var = bias_variance_decomp(
             model,
             X_train.values, y_train.values,
             X_test.values, y_test.values,
-            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=num_rounds,
+            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=20,
             random_seed=123)
 
         if task == 'Classification':
@@ -1270,7 +1285,10 @@ if valid_mod:
         st.subheader(f"Bilan des Erreurs de Classification")
         for index, model in df_score['Best Model'].items():
             model = instance_model(idx, df_train2, task)
+            model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
+            
+            # Calculer la matrice de confusion
             cm = confusion_matrix(y_test, y_pred)
             
             fig, ax = plt.subplots(figsize=(3, 2))  # Taille du graphique
@@ -1293,11 +1311,12 @@ if valid_mod:
     
     # Feature importance
     st.subheader(f"Importance des variables")
-    for index, model in df_score['Best Model'].items():
+    for index, mdl in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
+        model.fit(X_train, y_train)
         
         # Calculer l'importance des features par permutation
-        result = permutation_importance(model, X_test, y_test, n_repeats=int(trial*1.5), random_state=42)
+        result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
 
         # Extraire l'importance moyenne des features
         importances = result.importances_mean
@@ -1324,7 +1343,8 @@ if valid_mod:
     # Courbes d'apprentissage
     st.subheader(f"Courbes d'apprentissage")
     
-    for index, model in df_score['Best Model'].items():        
+    for index, mdl in df_score['Best Model'].items(): 
+        model = instance_model(idx, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
             model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
@@ -1342,7 +1362,6 @@ if valid_mod:
         plt.legend(loc="best", fontsize=6)
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
-        st.pyplot(plt)
         plt.close()
         
     # Analyse de drift

@@ -776,7 +776,9 @@ print(df_bias_variance)
 # 9. Afficher la matrice de confusion  
 if task=='Classification':
     for index, model in df_score['Best Model'].items():
-        # Prédictions pour la matrice de confusion
+        model = instance_model(idx, df_train2, task)
+        model.fit(X_train, y_train)
+        
         y_pred = model.predict(X_test)
         
         # Si multi_classe est True, on génère une matrice de confusion adaptée
@@ -810,6 +812,7 @@ if task=='Classification':
 # Feature importance
 for index, mdl in df_score['Best Model'].items():
     model = instance_model(idx, df_train2, task)
+    model.fit(X_train, y_train)
     
     # Calculer l'importance des features par permutation
     result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
