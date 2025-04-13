@@ -1332,14 +1332,14 @@ if valid_mod:
         plt.xlabel("Importance", fontsize=7)
         plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
         plt.gca().invert_yaxis()
-        plt.close()
         st.pyplot(plt)
+        plt.close()
             
     # Courbes d'apprentissage
     st.subheader(f"Courbes d'apprentissage")
     
     for index, mdl in df_score['Best Model'].items(): 
-        model = instance_model(index, df_train2, task)       
+        model = instance_model(idx, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
             model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
@@ -1357,8 +1357,8 @@ if valid_mod:
         plt.legend(loc="best", fontsize=6)
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
-        plt.close()
         st.pyplot(plt)
+        plt.close()
         
     # Analyse de drift
     st.subheader("Analyse de drift : comparaison des distributions entre apprentissage et validation")
