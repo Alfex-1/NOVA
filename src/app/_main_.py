@@ -1186,8 +1186,6 @@ if valid_mod:
     # Créer un DataFrame à partir des résultats
     df_train = pd.DataFrame(results)
 
-    # Afficher les résultats de la comparaison
-    st.subheader("Comparaison et optimisation des modèles")
     df_train2=df_train.copy()        
     df_train2.set_index('Model', inplace=True)
     df_train2["Best Model"] = df_train2["Best Model"].astype(str)
