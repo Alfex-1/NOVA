@@ -1253,7 +1253,7 @@ if valid_mod:
         expected_loss, bias, var = bias_variance_decomp(
             model, task=task,
             X=X_train.values, y=y_train.values,
-            num_rounds=cv)
+            cv=cv)
 
         if task == 'Classification':
             bias_variance_results.append({
