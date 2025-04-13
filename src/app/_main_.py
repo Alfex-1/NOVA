@@ -1190,7 +1190,7 @@ if valid_mod:
     df_train2.set_index('Model', inplace=True)
     df_train2["Best Model"] = df_train2["Best Model"].astype(str)
       
-    st.dataframe(df_train2)
+    st.dataframe(df_train2.drop(columns='Best Params'), use_container_width=True)
     # st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
     
     # 7. Evaluer les meilleurs modèles
@@ -1248,7 +1248,7 @@ if valid_mod:
     df_score.index = df_train2.index
     df_score2 = df_score.drop(columns='Best Model')
     st.subheader("Validation des modèles")
-    st.dataframe(df_score2)
+    st.dataframe(df_score2, use_container_width=True)
     
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
     bias_variance_results = []
@@ -1363,6 +1363,7 @@ if valid_mod:
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
         plt.close()
+        st.pyplot(plt)
         
     # Analyse de drift
     st.subheader("Analyse de drift : comparaison des distributions entre apprentissage et validation")
@@ -1399,14 +1400,9 @@ if valid_mod:
             file_path = os.path.join(save_dir, f"{model_name}.pkl")
             with open(file_path, "wb") as f:
                 pickle.dump(best_model, f)
-        
-        # # Génération du rapport PDF
-        # pdf_path = os.path.join(save_dir, "rapport_modelisation.pdf")
-        # doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        # doc.build(story)  # story doit avoir été remplie au préalable
 
         # Message de succès global
-        st.success(f"✅ Tous les modèles et le rapport PDF ont été enregistrés dans `{save_dir}`.")
+        st.success(f"✅ Tous les modèles ont été enregistrés dans `{save_dir}`.")
     else:
         st.error("❌ Le chemin spécifié n'existe pas ou n'est pas valide.")
  
