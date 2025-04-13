@@ -558,7 +558,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'algorithm': trial.suggest_categorical('algorithm', ['auto', 'ball_tree', 'kd_tree', 'brute']),
             'leaf_size': trial.suggest_int('leaf_size', 10, 50),
         }
-        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, n_jobs=-1)
+        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, , n_jobs=-1)
 
     # Validation croisée pour évaluer le modèle
     cv_results = cross_validate(model, X, y, cv=cv, scoring=scoring_comp, return_train_score=False)
@@ -978,10 +978,9 @@ if df is not None:
         time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
         
         # Pondération de complexité selon les modèles
-        complexity_weights = {
-            "Linear Regression": 1, "Logistic Regression": 2,
-            "KNN": 4, "SVM": 6, "Random Forest": 8,
-            "LightGBM": 7, "XGBoost": 7}
+        complexity_weights = { "Linear Regression": 1, "Logistic Regression": 2,
+                              "KNN": 4, "SVM": 6, "Random Forest": 8,
+                              "LightGBM": 7, "XGBoost": 7}
         
         # Paramètres de base
         max_global_trials = 50
@@ -1232,7 +1231,7 @@ if valid_mod:
 
     # Derniers traitement
     df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-    df_score.index = df_train2.index
+    df_score.index = df_train.index
     df_score2 = df_score.drop(columns='Best Model')
     st.subheader("Validation des modèles")
     st.dataframe(df_score2)
