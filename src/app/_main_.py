@@ -1316,13 +1316,18 @@ if valid_mod:
     
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
     bias_variance_results = []
+    if task == 'Classification':
+        loss = "0-1_loss"
+    else:
+        loss ="mse"
+    
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         expected_loss, bias, var = bias_variance_decomp(
             model,
             X_train, y_train,
             X_test, y_test,
-            loss="mse" if task == 'Regression' else "0-1_loss",
+            loss=loss,
             num_rounds=cv)
 
         if task == 'Classification':
