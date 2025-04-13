@@ -640,7 +640,7 @@ def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_
     return avg_expected_loss, avg_bias, avg_var
 
 
-def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_seed=None, **fit_params):
+def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_seed=None):
     """
     Estimation du biais, de la variance et de la perte attendue par validation croisée.
     
@@ -658,8 +658,6 @@ def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_
         Nombre de folds pour la validation croisée.
     random_seed : int
         Graine aléatoire pour la reproductibilité.
-    fit_params : dict
-        Paramètres supplémentaires pour `.fit()`.
     
     Returns
     -------
@@ -682,7 +680,7 @@ def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_
     for train_idx, test_idx in kf.split(X):
         X_train_fold, X_test_fold = X[train_idx], X[test_idx]
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
-        model = estimator.fit(X_train_fold, y_train_fold, **fit_params)
+        model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
 
         all_pred.append(preds)
@@ -1324,8 +1322,8 @@ if valid_mod:
             model,
             X_train, y_train,
             X_test, y_test,
-            loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=cv,
-            random_seed=123)
+            loss="mse" if task == 'Regression' else "0-1_loss",
+            num_rounds=cv)
 
         if task == 'Classification':
             bias_variance_results.append({
