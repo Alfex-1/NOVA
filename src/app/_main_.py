@@ -613,7 +613,7 @@ def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
         model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
-        print(len(preds), len(y_test_fold))
+        
         all_pred.append(preds)
         y_tests.append(y_test_fold)
 
@@ -679,8 +679,8 @@ def instance_model(index, df, task):
             alpha = best_params.get('lasso_alpha')
             model = Lasso(alpha=alpha)
         elif type_model_reg == 'elasticnet':
-            alpha = best_params.get('elasticnet_alpha')
-            l1_ratio = best_params.get('l1_ratio')
+            alpha = list(best_params.values())[1]
+            l1_ratio = list(best_params.values())[2]
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
         
     elif model_name == 'Logistic Regression':

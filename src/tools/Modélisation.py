@@ -455,7 +455,7 @@ def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
         model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
-        print(len(preds), len(y_test_fold))
+        
         all_pred.append(preds)
         y_tests.append(y_test_fold)
 
@@ -521,8 +521,8 @@ def instance_model(index, df, task):
             alpha = best_params.get('lasso_alpha')
             model = Lasso(alpha=alpha)
         elif type_model_reg == 'elasticnet':
-            alpha = best_params.get('elasticnet_alpha')
-            l1_ratio = best_params.get('l1_ratio')
+            alpha = list(best_params.values())[1]
+            l1_ratio = list(best_params.values())[2]
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
         
     elif model_name == 'Logistic Regression':
@@ -669,7 +669,7 @@ for model in models:
                                                          X_train=X_train, y_train=y_train,
                                                          cv=cv, scoring=scoring_comp,
                                                          multi_class=multi_class,
-                                                         n_trials=100, n_jobs=-1)
+                                                         n_trials=5, n_jobs=-1)
     
     # Ajouter les résultats à la liste
     results.append({
@@ -766,6 +766,7 @@ for idx, best_model in df_score['Best Model'].items():
 df_bias_variance = pd.DataFrame(bias_variance_results)
 df_bias_variance.index = df_train2.index
 print(df_bias_variance)
+
 # 9. Afficher la matrice de confusion  
 if task=='Classification':
     for index, model in df_score['Best Model'].items():
