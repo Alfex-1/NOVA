@@ -600,77 +600,8 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def _draw_bootstrap_sample(rng, X, y):
-    sample_indices = np.arange(X.shape[0])
-    bootstrap_indices = rng.choice(sample_indices, size=sample_indices.shape[0], replace=True)
-    return X[bootstrap_indices], y[bootstrap_indices]
-
-def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_loss", num_rounds=200, random_seed=None, **fit_params):
-    if loss not in ["0-1_loss", "mse"]:
-        raise NotImplementedError("Loss must be '0-1_loss' or 'mse'")
-
-    rng = np.random.RandomState(random_seed)
-    all_pred = np.zeros((num_rounds, y_test.shape[0]), dtype=np.float64 if loss == "mse" else np.int64)
-
-    for i in range(num_rounds):
-        X_boot, y_boot = _draw_bootstrap_sample(rng, X_train, y_train)
-        pred = estimator.fit(X_boot, y_boot, **fit_params).predict(X_test)
-        all_pred[i] = pred
-
-    main_predictions = np.apply_along_axis(np.mean if loss == "mse" else lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
-    
-    if loss == "0-1_loss":
-        main_predictions = np.apply_along_axis(lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
-        avg_expected_loss = np.apply_along_axis(lambda x: (x != y_test).mean(), axis=1, arr=all_pred).mean()
-        
-        avg_bias = np.sum(main_predictions != y_test) / y_test.size
-        var = np.zeros(pred.shape)
-        for pred in all_pred:
-            var += (pred != main_predictions).astype(np.int_)
-        var /= num_rounds
-
-        avg_var = var.sum() / y_test.shape[0]
-    else:
-        avg_expected_loss = np.apply_along_axis(lambda x: ((x - y_test) ** 2).mean(), axis=1, arr=all_pred).mean()
-        main_predictions = np.mean(all_pred, axis=0)
-
-        avg_bias = np.sum((main_predictions - y_test)) / y_test.size
-        avg_var = np.sum((main_predictions - all_pred) ** 2) / all_pred.size
-    
-    return avg_expected_loss, avg_bias, avg_var
-
-
-def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_seed=None):
-    """
-    Estimation du biais, de la variance et de la perte attendue par validation croisée.
-    
-    Parameters
-    ----------
-    estimator : object
-        Modèle sklearn avec les méthodes fit/predict.
-    X : ndarray
-        Données d'entrée.
-    y : ndarray
-        Cibles.
-    loss : str
-        "0-1_loss" pour classification, "mse" pour régression.
-    num_rounds : int
-        Nombre de folds pour la validation croisée.
-    random_seed : int
-        Graine aléatoire pour la reproductibilité.
-    
-    Returns
-    -------
-    avg_expected_loss : float
-        Perte moyenne.
-    avg_bias : float
-        Biais estimé.
-    avg_var : float
-        Variance estimée.
-    """
-    if loss not in ["0-1_loss", "mse"]:
-        raise NotImplementedError("Loss must be '0-1_loss' or 'mse'")
-
+def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
+    # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
     rng = np.random.RandomState(random_seed)
     kf = KFold(n_splits=num_rounds, shuffle=True, random_state=rng)
 
@@ -682,22 +613,23 @@ def bias_variance_decomp(estimator, X, y, loss="0-1_loss", num_rounds=5, random_
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
         model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
-
+        print(len(preds), len(y_test_fold))
         all_pred.append(preds)
         y_tests.append(y_test_fold)
 
-    all_pred = np.concatenate([p.reshape(1, -1) for p in all_pred], axis=1)
+    all_pred = np.concatenate(all_pred)
     y_tests = np.concatenate(y_tests)
 
-    if loss == "0-1_loss":
-        main_predictions = np.apply_along_axis(lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred.astype(int))
-        avg_expected_loss = np.mean(np.mean(all_pred != y_tests, axis=0))
-        avg_bias = np.sum(main_predictions != y_tests) / y_tests.size
-        var = np.mean((all_pred != main_predictions).astype(int))
-        avg_var = var
+    if task == "Classification":
+        # Classification : calcul de la majorité des prédictions (mode)
+        main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
+        avg_expected_loss = np.mean(all_pred != y_tests)
+        avg_bias = np.mean(main_predictions != y_tests)
+        avg_var = np.mean((all_pred != main_predictions).astype(int))
     else:
+        # Régression : calcul de la moyenne des prédictions
         main_predictions = np.mean(all_pred, axis=0)
-        avg_expected_loss = np.mean(np.mean((all_pred - y_tests) ** 2, axis=0))
+        avg_expected_loss = np.mean((all_pred - y_tests) ** 2)
         avg_bias = np.mean(main_predictions - y_tests)
         avg_var = np.mean((all_pred - main_predictions) ** 2)
 
@@ -1316,18 +1248,11 @@ if valid_mod:
     
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
     bias_variance_results = []
-    if task == 'Classification':
-        loss = "0-1_loss"
-    else:
-        loss ="mse"
-    
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         expected_loss, bias, var = bias_variance_decomp(
             model,
-            X_train, y_train,
-            X_test, y_test,
-            loss=loss,
+            X=X_train.values, y=y_train.values,
             num_rounds=cv)
 
         if task == 'Classification':
@@ -1339,7 +1264,7 @@ if valid_mod:
             bias_variance_results.append({
                 # "Average Squared Loss": round(expected_loss, 3),
                 "Bias": round(bias, 3),
-                "Variance": round(var, 3)})        
+                "Variance": round(var, 3)})         
         
     # Création du DataFrame
     df_bias_variance = pd.DataFrame(bias_variance_results)

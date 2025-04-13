@@ -14,8 +14,7 @@ from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split, cross_validate, learning_curve
-from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split, cross_validate, learning_curve, KFold
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
 import optuna
@@ -443,43 +442,39 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def _draw_bootstrap_sample(rng, X, y):
-    sample_indices = np.arange(X.shape[0])
-    bootstrap_indices = rng.choice(sample_indices, size=sample_indices.shape[0], replace=True)
-    return X[bootstrap_indices], y[bootstrap_indices]
-
-def bias_variance_decomp(estimator, X_train, y_train, X_test, y_test, loss="0-1_loss", num_rounds=200, random_seed=None, **fit_params):
-    if loss not in ["0-1_loss", "mse"]:
-        raise NotImplementedError("Loss must be '0-1_loss' or 'mse'")
-
+def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
+    # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
     rng = np.random.RandomState(random_seed)
-    all_pred = np.zeros((num_rounds, y_test.shape[0]), dtype=np.float64 if loss == "mse" else np.int64)
+    kf = KFold(n_splits=num_rounds, shuffle=True, random_state=rng)
 
-    for i in range(num_rounds):
-        X_boot, y_boot = _draw_bootstrap_sample(rng, X_train, y_train)
-        pred = estimator.fit(X_boot, y_boot, **fit_params).predict(X_test)
-        all_pred[i] = pred
+    all_pred = []
+    y_tests = []
 
-    main_predictions = np.apply_along_axis(np.mean if loss == "mse" else lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
-    
-    if loss == "0-1_loss":
-        main_predictions = np.apply_along_axis(lambda x: np.argmax(np.bincount(x)), axis=0, arr=all_pred)
-        avg_expected_loss = np.apply_along_axis(lambda x: (x != y_test).mean(), axis=1, arr=all_pred).mean()
-        
-        avg_bias = np.sum(main_predictions != y_test) / y_test.size
-        var = np.zeros(pred.shape)
-        for pred in all_pred:
-            var += (pred != main_predictions).astype(np.int_)
-        var /= num_rounds
+    for train_idx, test_idx in kf.split(X):
+        X_train_fold, X_test_fold = X[train_idx], X[test_idx]
+        y_train_fold, y_test_fold = y[train_idx], y[test_idx]
+        model = estimator.fit(X_train_fold, y_train_fold)
+        preds = model.predict(X_test_fold)
+        print(len(preds), len(y_test_fold))
+        all_pred.append(preds)
+        y_tests.append(y_test_fold)
 
-        avg_var = var.sum() / y_test.shape[0]
+    all_pred = np.concatenate(all_pred)
+    y_tests = np.concatenate(y_tests)
+
+    if task == "Classification":
+        # Classification : calcul de la majorité des prédictions (mode)
+        main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
+        avg_expected_loss = np.mean(all_pred != y_tests)
+        avg_bias = np.mean(main_predictions != y_tests)
+        avg_var = np.mean((all_pred != main_predictions).astype(int))
     else:
-        avg_expected_loss = np.apply_along_axis(lambda x: ((x - y_test) ** 2).mean(), axis=1, arr=all_pred).mean()
+        # Régression : calcul de la moyenne des prédictions
         main_predictions = np.mean(all_pred, axis=0)
+        avg_expected_loss = np.mean((all_pred - y_tests) ** 2)
+        avg_bias = np.mean(main_predictions - y_tests)
+        avg_var = np.mean((all_pred - main_predictions) ** 2)
 
-        avg_bias = np.sum((main_predictions - y_test)) / y_test.size
-        avg_var = np.sum((main_predictions - all_pred) ** 2) / all_pred.size
-    
     return avg_expected_loss, avg_bias, avg_var
 
 def instance_model(index, df, task):
@@ -746,16 +741,15 @@ df_score.index = df_train2.index
 df_score2 = df_score.drop(columns='Best Model')
 print(df_score2)
 
+
 # 8. Calculer le biais et la variance
 bias_variance_results = []
 for idx, best_model in df_score['Best Model'].items():
     model = instance_model(idx, df_train2, task)
     expected_loss, bias, var = bias_variance_decomp(
         model,
-        X_train.values, y_train.values,
-        X_test.values, y_test.values,
-        loss="mse" if task == 'Regression' else "0-1_loss", num_rounds=20,
-        random_seed=123)
+        X=X_train.values, y=y_train.values,
+        num_rounds=cv)
 
     if task == 'Classification':
         bias_variance_results.append({
@@ -772,7 +766,6 @@ for idx, best_model in df_score['Best Model'].items():
 df_bias_variance = pd.DataFrame(bias_variance_results)
 df_bias_variance.index = df_train2.index
 print(df_bias_variance)
-
 # 9. Afficher la matrice de confusion  
 if task=='Classification':
     for index, model in df_score['Best Model'].items():
