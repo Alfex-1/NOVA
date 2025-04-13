@@ -660,6 +660,8 @@ X = df.drop(columns=target)
 y = df[target]
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)
+if use_loocv:
+    cv = X_train.shape[0]
 
 # 6. Choisir le meilleur modèle
 results = []

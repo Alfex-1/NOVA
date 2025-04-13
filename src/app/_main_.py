@@ -961,14 +961,12 @@ if df is not None:
         use_loocv = st.sidebar.checkbox("Utiliser une seule observation par évaluation (recommandé pour les petits ensembles de données uniquement)")
 
         # Si LOO-CV est coché, le champ des folds est désactivé
-        if use_loocv:
-            cv = df.shape[0]
-        else:
+        if not use_loocv:
             cv = st.sidebar.number_input(
                 "Nombre de folds (CV)",
                 min_value=2, max_value=20,
                 value=7, step=1,
-                disabled=use_loocv)
+                disabled=use_loocv)            
             
         # Demander le temps disponible selon les choix de l'utilisateur
         time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
@@ -1163,6 +1161,8 @@ if valid_mod:
     y = df[target]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, shuffle=True)
 
+    if use_loocv:
+        cv = X_train.shape[0]
     # 2. Choisir le meilleur modèle
     results = []
     for model in models:  
