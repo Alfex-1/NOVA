@@ -1188,11 +1188,12 @@ if valid_mod:
     df_train = pd.DataFrame(results)
 
     # Afficher les résultats de la comparaison
-    st.subheader("Comparaison et optimisation des modèles")       
-    df_train.set_index('Model', inplace=True)
-    df_train["Best Model"] = df_train["Best Model"].astype(str)
+    st.subheader("Comparaison et optimisation des modèles")
+    df_train2=df_train.copy()        
+    df_train2.set_index('Model', inplace=True)
+    df_train2["Best Model"] = df_train2["Best Model"].astype(str)
       
-    st.dataframe(df_train)
+    st.dataframe(df_train2)
     # st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
     
     # 7. Evaluer les meilleurs modèles
@@ -1231,15 +1232,15 @@ if valid_mod:
 
     # Derniers traitement
     df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-    df_score.index = df_train.index
-    df_score = df_score.drop(columns='Best Model')
+    df_score.index = df_train2.index
+    df_score2 = df_score.drop(columns='Best Model')
     st.subheader("Validation des modèles")
-    st.dataframe(df_score)
+    st.dataframe(df_score2)
     
     # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
     bias_variance_results = []
     for idx, best_model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train, task)
+        model = instance_model(idx, df_train2, task)
             
         expected_loss, bias, var = bias_variance_decomp(
             model,
@@ -1261,7 +1262,7 @@ if valid_mod:
         
     # Création du DataFrame
     df_bias_variance = pd.DataFrame(bias_variance_results)
-    df_bias_variance.index = df_train.index
+    df_bias_variance.index = df_train2.index
 
     # Affichage dans Streamlit
     st.subheader("Etude Bias-Variance")
@@ -1271,7 +1272,7 @@ if valid_mod:
     if task == 'Classification':
         st.subheader(f"Bilan des Erreurs de Classification")
         for index, model in df_score['Best Model'].items():
-            model = instance_model(idx, df_train, task)
+            model = instance_model(idx, df_train2, task)
             y_pred = model.predict(X_test)
             cm = confusion_matrix(y_test, y_pred)
             
@@ -1296,7 +1297,7 @@ if valid_mod:
     # Feature importance
     st.subheader(f"Importance des variables")
     for index, model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train, task)
+        model = instance_model(idx, df_train2, task)
         
         # Calculer l'importance des features par permutation
         result = permutation_importance(model, X_test, y_test, n_repeats=int(trial*1.5), random_state=42)

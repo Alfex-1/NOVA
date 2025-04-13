@@ -15,6 +15,7 @@ from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighbo
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split, cross_validate, learning_curve
+from sklearn.pipeline import Pipeline
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
 import optuna
