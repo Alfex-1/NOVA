@@ -341,46 +341,6 @@ def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
         
     return df
 
-def scale_data(df: pd.DataFrame, list_standard: list[str] = None, list_minmax: list[str] = None, list_robust: list[str] = None, list_quantile: list[str] = None):   
-    """
-    Applique différentes méthodes de mise à l'échelle sur les colonnes spécifiées d'un DataFrame.
-
-    Args:
-        df (pd.DataFrame): Le DataFrame contenant les données à transformer.
-        list_standard (list[str], optional): Liste des colonnes à standardiser (Z-score). 
-            La standardisation centre les données en moyenne 0 et écart-type 1. Defaults to None.
-        list_minmax (list[str], optional): Liste des colonnes à normaliser avec Min-Max Scaling. 
-            Transforme les données pour qu'elles soient dans l'intervalle [0, 1]. Defaults to None.
-        list_robust (list[str], optional): Liste des colonnes à transformer avec RobustScaler. 
-            Échelle robuste aux outliers basée sur le médian et l'IQR (Interquartile Range). Defaults to None.
-        list_quantile (list[str], optional): Liste des colonnes à transformer avec QuantileTransformer. 
-            Transforme les données en suivant une distribution uniforme. Defaults to None.
-
-    Returns:
-        pd.DataFrame: Le DataFrame avec les colonnes mises à l'échelle selon les transformations spécifiées.
-    """
-    # Standardisation (Z-score)
-    if list_standard and len(list_standard) > 0:
-        scaler = StandardScaler()
-        df[list_standard] = scaler.fit_transform(df[list_standard])
-    
-    # Min-Max Scaling
-    if list_minmax and len(list_minmax) > 0:
-        scaler = MinMaxScaler()
-        df[list_minmax] = scaler.fit_transform(df[list_minmax])
-    
-    # Robust Scaling
-    if list_robust and len(list_robust) > 0:
-        scaler = RobustScaler()
-        df[list_robust] = scaler.fit_transform(df[list_robust])
-    
-    # Quantile Transformation
-    if list_quantile and len(list_quantile) > 0:
-        scaler = QuantileTransformer(output_distribution='uniform')
-        df[list_quantile] = scaler.fit_transform(df[list_quantile])
-    
-    return df
-
 def transform_data(df: pd.DataFrame, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
     """
     Applique des transformations sur les colonnes spécifiées d'un DataFrame. 
@@ -765,11 +725,12 @@ if df is not None:
             df_copy=df_copy.drop(columns=target)
         
         # Tout mettre à l'échelle directement
-        scale_all_data = st.sidebar.checkbox("Mettre à l'échelle toutes les données avec la même méthode", value=False)
-        
-        if scale_all_data:
-            scale_method = st.sidebar.selectbox("Méthode de mise à l'échelle à appliquer",
-                                                ["Standard Scaler", "MinMax Scaler", "Robust Scaler", "Quantile Transformer (Uniform)"])
+        scale_method = st.sidebar.selectbox("Méthode de mise à l'échelle à appliquer",
+                                            ["Standard Scaler", "MinMax Scaler", "Robust Scaler", "Quantile Transformer (Uniform)"])
+        if list(scale_method) > 0:
+            scale_all_data =  True
+        else:
+            scale_all_data = False
         
         # Obtenir des dataframes distinctes selon les types des données
         if not use_target:
@@ -778,26 +739,6 @@ if df is not None:
             df_num = df.select_dtypes(include=['number'])
 
         df_cat = df.select_dtypes(exclude=['number'])
-        
-        # Mise à l'échelle (si pas de mise à l'échelle sur toutes les données d'un seul coup)
-        if not scale_all_data:
-            list_standard = None
-            list_minmax = None
-            list_robust = None
-            list_quantile = None
-            list_standard = st.sidebar.multiselect("Colonnes à standardiser (StandardScaler)", df_num.columns.to_list())
-            list_minmax = st.sidebar.multiselect("Colonnes à normaliser (MinMaxScaler)", df_num.columns.to_list())
-            list_robust = st.sidebar.multiselect("Colonnes à normaliser avec robustesse (RobustScaler)", df_num.columns.to_list())
-            list_quantile = st.sidebar.multiselect("Colonnes à transformer en distribution uniforme (QuantileTransformer)", df_num.columns.to_list())
-            
-            # Vérification dans les listes de mise à l'échelle
-            scaling_vars = list_standard + list_minmax + list_robust + list_quantile
-
-            # Vérifier les doublons dans les listes de mise à l'échelle
-            duplicates_in_scaling = set([var for var in scaling_vars if scaling_vars.count(var) > 1])
-            if duplicates_in_scaling:
-                pb = True
-                st.sidebar.warning(f"⚠️ Les variables suivantes sont présentes plusieurs fois dans les listes des variables à mettre à l'échelle : {', '.join(duplicates_in_scaling)}") 
         
         # Sélection des variables à encoder
         if df_cat.shape[1] > 0:
@@ -997,7 +938,6 @@ if df is not None:
             trial = min(150, int(round(trial * 1.5)))
         trial = int(min(max_trials_hard_limit, max(5, round(trial))))
         
-        num_rounds = trial
         repeats = trial
             
         st.sidebar.subheader("Enregistrement des modèles")
@@ -1187,7 +1127,6 @@ if valid_mod:
     df_train2["Best Model"] = df_train2["Best Model"].astype(str)
       
     st.dataframe(df_train2.drop(columns='Best Params'), use_container_width=True)
-    # st.write(f"Nombre d'essais Optuna: {trial}, Nombre de rounds: {num_rounds}")
     
     # 7. Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
@@ -1310,7 +1249,7 @@ if valid_mod:
         model.fit(X_train, y_train)
         
         # Calculer l'importance des features par permutation
-        result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
+        result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
 
         # Extraire l'importance moyenne des features
         importances = result.importances_mean
