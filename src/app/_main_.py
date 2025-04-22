@@ -687,18 +687,21 @@ valid_wrang=False
 if uploaded_file is not None:
     byte_data = uploaded_file.read()
     separators = [";", ",", "\t"]
+    df = None
+    detected_sep = None
 
-    # Lecture optimisée avec sélection du premier séparateur valide
     for sep in separators:
         try:
-            df = mpd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)  # Charge un échantillon
-            if df.shape[1] > 1:
-                df = mpd.read_csv(BytesIO(byte_data), sep=sep)  # Recharge tout avec le bon séparateur
+            tmp_df = mpd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            if tmp_df.shape[1] > 1:
+                detected_sep = sep
                 break
         except Exception:
-            df, sep = None, None  # Réinitialisation en cas d'échec
+            continue  # Tu continues juste, sans tout casser comme un enfant de 4 ans
 
-    if sep is None:
+    if detected_sep is not None:
+        df = mpd.read_csv(BytesIO(byte_data), sep=detected_sep)  # Chargement complet proprement
+    else:
         st.warning("Échec de la détection du séparateur. Vérifiez le format du fichier.")
 
 # Sidebar pour la configuration de l'utilisateur    
