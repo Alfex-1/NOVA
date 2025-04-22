@@ -2,6 +2,7 @@
 # from tools.utils import *
 import numpy as np
 import pandas as pd
+import modin.pandas as mpd
 from matplotlib import pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -85,7 +86,7 @@ def encode_data(df: pd.DataFrame,
         encoded_cols = encoder.get_feature_names_out(list_binary)
         encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
         df.drop(columns=list_binary, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        df = mpd.concat([df, encoded_df], axis=1)
 
     # Ordinal
     if list_ordinal:
@@ -103,7 +104,7 @@ def encode_data(df: pd.DataFrame,
         encoded_cols = encoder.get_feature_names_out(list_nominal)
         encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
         df.drop(columns=list_nominal, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        df = mpd.concat([df, encoded_df], axis=1)
 
     return df
 
@@ -690,9 +691,9 @@ if uploaded_file is not None:
     # Lecture optimisée avec sélection du premier séparateur valide
     for sep in separators:
         try:
-            df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)  # Charge un échantillon
+            df = mpd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)  # Charge un échantillon
             if df.shape[1] > 1:
-                df = pd.read_csv(BytesIO(byte_data), sep=sep)  # Recharge tout avec le bon séparateur
+                df = mpd.read_csv(BytesIO(byte_data), sep=sep)  # Recharge tout avec le bon séparateur
                 break
         except Exception:
             df, sep = None, None  # Réinitialisation en cas d'échec
@@ -725,12 +726,11 @@ if df is not None:
             df_copy=df_copy.drop(columns=target)
         
         # Tout mettre à l'échelle directement
-        scale_method = st.sidebar.selectbox("Méthode de mise à l'échelle à appliquer",
-                                            ["Standard Scaler", "MinMax Scaler", "Robust Scaler", "Quantile Transformer (Uniform)"])
-        if list(scale_method) > 0:
-            scale_all_data =  True
-        else:
-            scale_all_data = False
+        scale_all_data = st.sidebar.checkbox("Voulez-vous mettre à l'échelle vos données ?")
+        
+        if scale_all_data:
+            scale_method = st.sidebar.selectbox("Méthode de mise à l'échelle à appliquer",
+                                                ["Standard Scaler", "MinMax Scaler", "Robust Scaler", "Quantile Transformer (Uniform)"])
         
         # Obtenir des dataframes distinctes selon les types des données
         if not use_target:
@@ -983,7 +983,7 @@ if valid_wrang:
                 df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
                                         columns=df_imputed.drop(columns=target).columns,
                                         index=df_imputed.index)
-                df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
+                df_scaled = mmpd.concat([df_scaled, df_imputed[target]], axis=1)
             else:
                 df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
 
@@ -1025,7 +1025,7 @@ if valid_wrang:
         
         df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
         if df_target is not None:
-            df_scaled = pd.concat([df_pca, df_target], axis=1)
+            df_scaled = mpd.concat([df_pca, df_target], axis=1)
         else:
             df_scaled = df_pca.copy()
             
