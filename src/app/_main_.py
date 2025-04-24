@@ -1278,7 +1278,7 @@ if valid_mod:
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
-            model,
+            model, task=task,
             X=X_train.values, y=y_train.values,
             cv=cv)
 
