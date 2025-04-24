@@ -558,7 +558,7 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     study = optuna.create_study(direction='maximize',
                                 sampler=TPESampler(prior_weight=0.5, n_startup_trials=10,
                                                    n_ei_candidates=12,warn_independent_sampling=False,
-                                                   gamma=0.5, seed=42),
+                                                   seed=42),
                                 pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
     study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen, multi_class=multi_class, X=X_train, y=y_train, cv=cv, scoring_comp=scoring), n_trials=n_trials, n_jobs=n_jobs)
     
