@@ -14,7 +14,6 @@ from scipy import stats
 from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
-from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
@@ -24,7 +23,7 @@ import xgboost as xgb
 import lightgbm as lgb
 import optuna
 from optuna.samplers import TPESampler
-from optuna.pruners import HyperbandPruner
+from optuna.pruners import SuccessiveHalvingPruner
 from sklearn.metrics import confusion_matrix
 import io
 from io import BytesIO
@@ -451,7 +450,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'subsample': trial.suggest_float('subsample', 0.5, 1.0, step=0.01),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0, step=0.01),
         }
-        model = lgb.LGBMRegressor(**param, verbose=-1, n_jobs=-1) if task == 'Regression' else lgb.LGBMClassifier(**param, verbose=-1, n_jobs=-1)
+        model = lgb.LGBMRegressor(random_state=42, **param, verbose=-1, n_jobs=-1) if task == 'Regression' else lgb.LGBMClassifier(random_state=42, **param, verbose=-1, n_jobs=-1)
 
     elif model_type == "XGBoost":
         # Déterminer l'objectif et les métriques selon la tâche
@@ -483,10 +482,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             param['num_class'] = num_class
 
         # Créer le modèle avec les meilleurs paramètres
-        if task == 'Regression':
-            model = xgb.XGBRegressor(**param, n_jobs=-1)
-        else:
-            model = xgb.XGBClassifier(**param, n_jobs=-1)
+        model = xgb.XGBRegressor(random_state=42, **param, n_jobs=-1) if task == 'Regression' else xgb.XGBClassifier(random_state=42, **param, n_jobs=-1)
 
     elif model_type == "Random Forest":
         param = {
@@ -496,16 +492,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
             'max_features': trial.suggest_categorical('max_features', [None, 'sqrt', 'log2'])
         }
-        model = RandomForestRegressor(**param, n_jobs=-1) if task == 'Regression' else RandomForestClassifier(**param, n_jobs=-1)
-
-    elif model_type == "SVM":
-        param = {
-            'C': trial.suggest_float('C', 0.1, 10.0, log=True),
-            'kernel': trial.suggest_categorical('kernel', ['linear', 'poly', 'rbf', 'sigmoid']),
-            'gamma': trial.suggest_categorical('gamma', ['scale', 'auto']),
-            'degree': trial.suggest_int('degree', 2, 5),
-        }
-        model = SVC(**param) if task == 'Classification' else SVR(**param)
+        model = RandomForestRegressor(random_state=42, **param, n_jobs=-1) if task == 'Regression' else RandomForestClassifier(random_state=42, **param, n_jobs=-1)
 
     elif model_type == "Linear Regression":
         # Définition des hyperparamètres pour la régression linéaire et les modèles régularisés
@@ -517,19 +504,19 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
         elif model_linreg == "ridge":
             ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, log=True)
             ridge_alpha = round(ridge_alpha, 2)
-            model = Ridge(alpha=ridge_alpha)
+            model = Ridge(alpha=ridge_alpha, random_state=42)
 
         elif model_linreg == "lasso":
             lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, log=True)
             lasso_alpha = round(lasso_alpha, 2)
-            model = Lasso(alpha=lasso_alpha)
+            model = Lasso(alpha=lasso_alpha, random_state=42)
 
         elif model_linreg == "elasticnet":
             enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, log=True)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
-            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
+            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio, random_state=42)
 
     elif model_type == "Logistic Regression":
         # Paramètres pour la régression logistique
@@ -540,16 +527,16 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
         if penalty == "elasticnet":
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
             l1_ratio = round(l1_ratio, 2)
-            model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1, random_state=42)
         elif penalty == "l1":
             solver = "saga" if multi_class else "liblinear"
-            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
         elif penalty == "l2":
             solver = "saga" if multi_class else "lbfgs"
-            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
         else:
             solver = "saga" if multi_class else "lbfgs"
-            model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
 
 
     elif model_type == "KNN":
@@ -559,7 +546,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'algorithm': trial.suggest_categorical('algorithm', ['auto', 'ball_tree', 'kd_tree', 'brute']),
             'leaf_size': trial.suggest_int('leaf_size', 10, 50),
         }
-        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, n_jobs=-1)
+        model = KNeighborsRegressor(random_state=42, **param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(random_state=42, **param, n_jobs=-1)
 
     # Validation croisée pour évaluer le modèle
     cv_results = cross_validate(model, X, y, cv=cv, scoring=scoring_comp, return_train_score=False)
@@ -568,7 +555,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
     return np.mean(cv_results['test_score'])
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_quared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
-    study = optuna.create_study(direction='maximize', sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
+    study = optuna.create_study(direction='maximize', sampler=TPESampler(n_startup_trials=15, seed=42), pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
     study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen, multi_class=multi_class, X=X_train, y=y_train, cv=cv, scoring_comp=scoring), n_trials=n_trials, n_jobs=n_jobs)
     
     # Créer le modèle avec les meilleurs hyperparamètres
@@ -578,8 +565,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         best_model = xgb.XGBRegressor(**study.best_params) if task == 'Regression' else xgb.XGBClassifier(**study.best_params)
     elif model_choosen == "Random Forest":
         best_model = RandomForestRegressor(**study.best_params) if task == 'Regression' else RandomForestClassifier(**study.best_params)
-    elif model_choosen == "SVM":
-        best_model = SVR(**study.best_params) if task == 'Regression' else SVC(**study.best_params)
     elif model_choosen == "Linear Regression":
         # Gestion des régressions linéaires et régularisées
         if "model" in study.best_params and study.best_params["model"] == "linear":
@@ -609,8 +594,7 @@ def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
     de variance en fonction de la tâche (régression ou classification).
 
     Args:
-        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer, par exemple, une régression 
-                                                linéaire, un classifieur SVM, etc.
+        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer.
         X (array-like, shape (n_samples, n_features)): Matrices de caractéristiques, où chaque ligne est une 
                                                       observation et chaque colonne est une caractéristique.
         y (array-like, shape (n_samples,)): Vecteur ou matrice des valeurs cibles (vérités terrain), qui 
@@ -632,13 +616,14 @@ def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
             - var_relative (float): Variance relative des prédictions par rapport à la variance de la cible 
                                      (régression) ou au nombre de classes (classification).
     """
-    # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
+    # Initialisation
     rng = np.random.RandomState(random_seed)
     kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
 
     all_pred = []
     y_tests = []
 
+    # Boucle sur les folds de validation croisée
     for train_idx, test_idx in kf.split(X):
         X_train_fold, X_test_fold = X[train_idx], X[test_idx]
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
@@ -725,12 +710,6 @@ def instance_model(index, df, task):
         
     elif model_name == 'Logistic Regression':
         model = LogisticRegression(*best_params)
-           
-    elif model_name == 'SVM':
-        if task == 'Classification':
-            model = SVC(**best_params)  # SVC pour classification
-        else:
-            model = SVR(**best_params)  # SVR pour régression
     
     return model
 
@@ -748,7 +727,7 @@ st.write(
 
     **Fonctionnalités principales :**
     - 🔄 **Prétraitement des données** : mise à l’échelle, encodage, gestion des valeurs manquantes, outliers, et transformations adaptées.
-    - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 7 modèles populaires (régression linéaire/logistique, KNN, SVM, Random Forest, LightGBM, XGboost).
+    - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 7 modèles populaires (régression linéaire/logistique, KNN, Random Forest, LightGBM, XGboost).
     - 🏆 **Évaluation des modèles** : validation croisée, analyse biais-variance, importance par permutation, analyse de drift et matrice de confusion pour les tâches de classification.
     
     **NOVA** permet à chaque utilisateur de bénéficier d’une infrastructure robuste, tout en maintenant une flexibilité totale sur le traitement fondamental des données.
@@ -933,9 +912,9 @@ if df is not None:
 
         # Sélection des modèles
         if task == "Regression":
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "SVM", "Random Forest", "XGBoost", "LightGBM"], default=["Linear Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Linear Regression", "KNN", "Random Forest", "XGBoost", "LightGBM"], default=["Linear Regression"])
         else:
-            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "SVM", "Random Forest", "XGBoost", "LightGBM"], default=["Logistic Regression"])
+            models = st.sidebar.multiselect("Modèle(s) à tester", ["Logistic Regression", "KNN", "Random Forest", "XGBoost", "LightGBM"], default=["Logistic Regression"])
             
         # Sélection du critère de scoring
         metrics_regression = {
@@ -1005,7 +984,7 @@ if df is not None:
         
         # Pondération de complexité selon les modèles
         complexity_weights = { "Linear Regression": 1, "Logistic Regression": 2,
-                              "KNN": 4, "SVM": 6, "Random Forest": 8,
+                              "KNN": 4, "Random Forest": 8,
                               "LightGBM": 7, "XGBoost": 7}
         
         # Paramètres de base
