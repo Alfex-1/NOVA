@@ -1292,12 +1292,12 @@ if valid_mod:
         }
         
         # Logique de conclusion en fonction du biais relatif et de la variance relative
-        if bias_relative > 0.2 and var_relative > 0.2:
-            result["Conclusion"] = "Problème majeur : Sous-ajusté et trop varié"
-        elif bias_relative > 0.2:
-            result["Conclusion"] = "Sous-ajusté (Biais élevé)"
+        if abs(bias_relative) > 0.2 and var_relative > 0.2:
+            result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
+        elif abs(bias_relative) > 0.2:
+            result["Conclusion"] = "Biais élevé : suspition de sous-ajustement"
         elif var_relative > 0.2:
-            result["Conclusion"] = "Trop varié (Variance élevée)"
+            result["Conclusion"] = "Variance élevée : suspition de sur-ajustement"
         else:
             result["Conclusion"] = "Bien équilibré"
         
