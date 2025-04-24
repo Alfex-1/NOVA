@@ -9,7 +9,7 @@ import plotly.express as px
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
 from scipy import stats
 from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
@@ -342,55 +342,95 @@ def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
         
     return df
 
-def transform_data(df: pd.DataFrame, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
+def transform_data(split_data: bool, df: pd.DataFrame = None, df_train: pd.DataFrame = None, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
     """
-    Applique des transformations sur les colonnes spécifiées d'un DataFrame. 
-    Les transformations incluent Box-Cox, Yeo-Johnson, logarithmique et racine carrée.
+    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées,
+    avec gestion optionnelle des ensembles d'entraînement et de test pour éviter toute fuite de données.
 
     Args:
-        df (pd.DataFrame): Le DataFrame contenant les données à transformer.
-        list_boxcox (list[str], optional): Liste des colonnes à transformer avec Box-Cox. 
-            La transformation Box-Cox nécessite des données strictement positives. Defaults to None.
-        list_yeo (list[str], optional): Liste des colonnes à transformer avec Yeo-Johnson. 
-            La transformation Yeo-Johnson permet de traiter aussi bien les données positives que négatives. Defaults to None.
-        list_log (list[str], optional): Liste des colonnes à transformer avec la transformation logarithmique. 
-            Nécessite que les données soient strictement positives. Defaults to None.
-        list_sqrt (list[str], optional): Liste des colonnes à transformer avec la racine carrée. 
-            Nécessite que les données soient positives ou nulles. Defaults to None.
+        split_data (bool): 
+            Indique si les données sont séparées en df_train et df_test. Si False, 'df' est utilisé pour transformation globale.
+        df (pd.DataFrame, optional): 
+            DataFrame complet à transformer si split_data=False. Ignoré sinon.
+        df_train (pd.DataFrame, optional): 
+            DataFrame d'entraînement à transformer si split_data=True.
+        df_test (pd.DataFrame, optional): 
+            DataFrame de test à transformer si split_data=True.
+        list_boxcox (list[str], optional): 
+            Liste des colonnes sur lesquelles appliquer la transformation de Box-Cox (valeurs strictement positives).
+        list_yeo (list[str], optional): 
+            Liste des colonnes sur lesquelles appliquer la transformation de Yeo-Johnson (valeurs quelconques).
+        list_log (list[str], optional): 
+            Liste des colonnes à transformer via logarithme naturel (valeurs strictement positives).
+        list_sqrt (list[str], optional): 
+            Liste des colonnes à transformer via racine carrée (valeurs ≥ 0).
 
     Returns:
-        pd.DataFrame: Le DataFrame avec les colonnes transformées selon les transformations spécifiées.
+        pd.DataFrame or tuple(pd.DataFrame, pd.DataFrame): 
+            - Si split_data=False : retourne le DataFrame transformé (df).
+            - Si split_data=True : retourne un tuple (df_train, df_test) transformés.
     """
-    
     # Box-Cox Transformation
     if list_boxcox and len(list_boxcox) > 0:
-        for col in list_boxcox:
-            df[col], _ = stats.boxcox(df[col])
+        transformer_bc = PowerTransformer(method='box-cox')
+        
+        if split_data:
+            transformer_bc.fit(df_train[list_boxcox])
+            df_train[list_boxcox] = transformer_bc.transform(df_train[list_boxcox])
+            df_test[list_boxcox] = transformer_bc.transform(df_test[list_boxcox])
+        else:
+            df[list_boxcox] = transformer_bc.fit_transform(df[list_boxcox])
 
     # Yeo-Johnson Transformation
     if list_yeo and len(list_yeo) > 0:
-        transformer = PowerTransformer(method='yeo-johnson')
-        df[list_yeo] = transformer.fit_transform(df[list_yeo])
+        transformer_yeo = PowerTransformer(method='yeo-johnson')
+        
+        if split_data:
+            transformer_yeo.fit(df_train[list_yeo])
+            df_train[list_yeo] = transformer_yeo.transform(df_train[list_yeo])
+            df_test[list_yeo] = transformer_yeo.transform(df_test[list_yeo])
+        else:
+            df[list_yeo] = transformer_yeo.fit_transform(df[list_yeo])
     
     # Logarithmic Transformation
     if list_log and len(list_log) > 0:
-        for col in list_log:
-            # Logarithme nécessite des données strictement positives
-            if (df[col] <= 0).any():
-                raise ValueError(f"Les données de la colonne '{col}' doivent être strictement positives pour appliquer le logarithme.")
-            df[col] = np.log(df[col])
+        if split_data:
+            for col in list_log:
+                df_train[col] = np.log(df_train[col])
+                df_test[col] = np.log(df_test[col])
+        else:        
+            for col in list_log:
+                df[col] = np.log(df[col])
 
     # Square Root Transformation
     if list_sqrt and len(list_sqrt) > 0:
-        for col in list_sqrt:
-            # Racine carrée nécessite des données positives ou nulles
-            if (df[col] < 0).any():
-                raise ValueError(f"Les données de la colonne '{col}' ne peuvent pas contenir de valeurs négatives pour appliquer la racine carrée.")
-            df[col] = np.sqrt(df[col])
+        if split_data:
+            for col in list_sqrt:
+                df_train[col] = np.sqrt(df_train[col])
+                df_test[col] = np.sqrt(df_test[col])
+        else:
+            for col in list_sqrt:
+                df[col] = np.sqrt(df[col])
     
-    return df
+    if split_data:
+        return df_train, df_test
+    else:
+        return df
 
 def calculate_inertia(X):
+    """
+    Calcule l'inertie (variance expliquée) de la dernière composante principale ajoutée à chaque étape
+    de l'ACP, en augmentant progressivement le nombre de composantes.
+
+    Args:
+        X (np.ndarray or pd.DataFrame): 
+            Matrice des données (features uniquement), à transformer via ACP.
+
+    Returns:
+        list[float]: 
+            Liste des pourcentages de variance expliquée par la dernière composante ajoutée à chaque itération 
+            (de 1 à n_features).
+    """
     inertias = []
     for i in range(1, X.shape[1] + 1):
         pca = PCA(n_components=i)
@@ -561,10 +601,40 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
+def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
+    """Calcule le biais et la variance d'un estimateur via une décomposition par validation croisée.
+
+    Cette fonction effectue une décomposition du biais et de la variance d'un modèle d'estimation en utilisant 
+    la validation croisée (KFold). Elle permet d'évaluer la performance de l'estimateur en termes de biais et 
+    de variance en fonction de la tâche (régression ou classification).
+
+    Args:
+        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer, par exemple, une régression 
+                                                linéaire, un classifieur SVM, etc.
+        X (array-like, shape (n_samples, n_features)): Matrices de caractéristiques, où chaque ligne est une 
+                                                      observation et chaque colonne est une caractéristique.
+        y (array-like, shape (n_samples,)): Vecteur ou matrice des valeurs cibles (vérités terrain), qui 
+                                            varient en fonction de la tâche (régression ou classification).
+        task (str): Type de tâche, soit "Classification", soit "Regression". Cela détermine le calcul du biais 
+                    et de la variance.
+        cv (int, optional): Nombre de divisions (splits) pour la validation croisée. Par défaut à 5.
+        random_seed (int, optional): Seed pour le générateur aléatoire, utile pour reproduire les résultats. 
+                                     Par défaut à None.
+
+    Returns:
+        tuple: Un tuple contenant les valeurs suivantes :
+            - avg_expected_loss (float): Perte moyenne (erreur quadratique moyenne pour la régression, erreur 
+                                          de classification pour la classification).
+            - avg_bias (float): Biais moyen (écart moyen entre les prédictions et les valeurs réelles).
+            - avg_var (float): Variance moyenne des prédictions.
+            - bias_relative (float): Biais relatif, normalisé par rapport à l'écart-type de la cible (régression) 
+                                     ou au nombre de classes (classification).
+            - var_relative (float): Variance relative des prédictions par rapport à la variance de la cible 
+                                     (régression) ou au nombre de classes (classification).
+    """
     # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
     rng = np.random.RandomState(random_seed)
-    kf = KFold(n_splits=num_rounds, shuffle=True, random_state=rng)
+    kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
 
     all_pred = []
     y_tests = []
@@ -587,6 +657,11 @@ def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
         avg_expected_loss = np.mean(all_pred != y_tests)
         avg_bias = np.mean(main_predictions != y_tests)
         avg_var = np.mean((all_pred != main_predictions).astype(int))
+
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions != y_tests) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        var_relative = np.mean((all_pred != main_predictions).astype(int)) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        
     else:
         # Régression : calcul de la moyenne des prédictions
         main_predictions = np.mean(all_pred, axis=0)
@@ -594,7 +669,11 @@ def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
         avg_bias = np.mean(main_predictions - y_tests)
         avg_var = np.mean((all_pred - main_predictions) ** 2)
 
-    return avg_expected_loss, avg_bias, avg_var
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
+        var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
+
+    return avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
@@ -669,8 +748,8 @@ st.write(
 
     **Fonctionnalités principales :**
     - 🔄 **Prétraitement des données** : mise à l’échelle, encodage, gestion des valeurs manquantes, outliers, et transformations adaptées.
-    - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 4 modèles populaires (régression linéaire/logistique, KNN, SVM, Random Forest).
-    - 🏆 **Évaluation des modèles** : validation croisée, analyse biais-variance, et matrice de confusion pour les tâches de classification.
+    - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 7 modèles populaires (régression linéaire/logistique, KNN, SVM, Random Forest, LightGBM, XGboost).
+    - 🏆 **Évaluation des modèles** : validation croisée, analyse biais-variance, importance par permutation, analyse de drift et matrice de confusion pour les tâches de classification.
     
     **NOVA** permet à chaque utilisateur de bénéficier d’une infrastructure robuste, tout en maintenant une flexibilité totale sur le traitement fondamental des données.
     Vous contrôlez les choix, nous optimisons les outils.
@@ -692,15 +771,15 @@ if uploaded_file is not None:
 
     for sep in separators:
         try:
-            tmp_df = mpd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
             if tmp_df.shape[1] > 1:
                 detected_sep = sep
                 break
         except Exception:
-            continue  # Tu continues juste, sans tout casser comme un enfant de 4 ans
+            continue
 
     if detected_sep is not None:
-        df = mpd.read_csv(BytesIO(byte_data), sep=detected_sep)  # Chargement complet proprement
+        df = pd.read_csv(BytesIO(byte_data), sep=detected_sep)  # Chargement complet proprement
     else:
         st.warning("Échec de la détection du séparateur. Vérifiez le format du fichier.")
 
@@ -711,7 +790,17 @@ if df is not None:
     if wrang is True:            
         st.sidebar.title("Paramètres du traitement des données")
         
-        target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list(), help="Si vous n'avaez pas de variable cible, choisissez une variable au harsard.")
+        # Demander s'il faut demander de diviser la base
+        split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
+        
+        if split_data:
+            test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
+            test_size=test_size/100
+            
+            df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
+        
+        # Demander la variable cible pour la modélisation
+        target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
         pb = False
         wrang_finished = False
         
@@ -722,11 +811,10 @@ if df is not None:
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
         
         if drop_dupli:
-            df.drop_duplicates(inplace=True)
+            df.drop_duplicates()
         
         if not use_target:
-            df_copy=df.copy()
-            df_copy=df_copy.drop(columns=target)
+            df_copy=df.copy().drop(columns=target)
         
         # Tout mettre à l'échelle directement
         scale_all_data = st.sidebar.checkbox("Voulez-vous mettre à l'échelle vos données ?")
@@ -738,10 +826,10 @@ if df is not None:
         # Obtenir des dataframes distinctes selon les types des données
         if not use_target:
             df_num = df_copy.select_dtypes(include=['number'])
+            df_cat = df_copy.select_dtypes(exclude=['number'])
         else:
             df_num = df.select_dtypes(include=['number'])
-
-        df_cat = df.select_dtypes(exclude=['number'])
+            df_cat = df.select_dtypes(exclude=['number'])
         
         # Sélection des variables à encoder
         if df_cat.shape[1] > 0:
@@ -986,16 +1074,13 @@ if valid_wrang:
                 df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
                                         columns=df_imputed.drop(columns=target).columns,
                                         index=df_imputed.index)
-                df_scaled = mmpd.concat([df_scaled, df_imputed[target]], axis=1)
+                df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
             else:
                 df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
 
         else:
             st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
         
-    else:
-        df_scaled = scale_data(df_imputed, list_standard=list_standard, list_minmax=list_minmax, list_robust=list_robust, list_quantile=list_quantile)
-
     # Appliquer les transformations individuelles
     if not scale_all_data:
         df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
@@ -1192,21 +1277,32 @@ if valid_mod:
     bias_variance_results = []
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
-        expected_loss, bias, var = bias_variance_decomp(
+        expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
             model,
             X=X_train.values, y=y_train.values,
-            num_rounds=cv)
+            cv=cv)
 
-        if task == 'Classification':
-            bias_variance_results.append({
-                # "Average 0-1 Loss": round(expected_loss, 3),
-                "Bias": round(bias, 3),
-                "Variance": round(var, 3)})
+        # Création d'un dictionnaire pour stocker les résultats
+        result = {
+            "Model Index": idx,  # L'index du modèle
+            "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
+            "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
+            "Bias Relative": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
+            "Variance Relative": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+        }
+        
+        # Logique de conclusion en fonction du biais relatif et de la variance relative
+        if bias_relative > 0.2 and var_relative > 0.2:
+            result["Conclusion"] = "Problème majeur : Sous-ajusté et trop varié"
+        elif bias_relative > 0.2:
+            result["Conclusion"] = "Sous-ajusté (Biais élevé)"
+        elif var_relative > 0.2:
+            result["Conclusion"] = "Trop varié (Variance élevée)"
         else:
-            bias_variance_results.append({
-                # "Average Squared Loss": round(expected_loss, 3),
-                "Bias": round(bias, 3),
-                "Variance": round(var, 3)})        
+            result["Conclusion"] = "Bien équilibré"
+        
+        # Ajout du dictionnaire à la liste des résultats
+        bias_variance_results.append(result)            
         
     # Création du DataFrame
     df_bias_variance = pd.DataFrame(bias_variance_results)
