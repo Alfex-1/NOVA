@@ -556,7 +556,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
 def parallel_objective(trial, task, model_type, multi_class, X, y, cv, scoring_comp):
     return objective(trial, task=task, model_type=model_type, multi_class=multi_class, X=X, y=y, cv=cv, scoring_comp=scoring_comp)
 
-def optimize_model_parallel(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_squared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
+def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_squared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
     study = optuna.create_study(direction='maximize', sampler=TPESampler(prior_weight=0.5, n_startup_trials=10, n_ei_candidates=12, warn_independent_sampling=False, seed=42), pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
 
     # Parallélisation de l'optimisation avec joblib
