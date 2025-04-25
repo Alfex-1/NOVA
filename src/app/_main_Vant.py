@@ -798,6 +798,8 @@ if df is not None:
         # Déterminer si la variable cible doit être incluse dans la mise à l'échelle
         use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Cochez cette case si vous ne souhaotez pas inclure une variable dans le traitement.")
         
+        if drop_dupli:
+            df.drop_duplicates()
         
         if not use_target:
             df_copy=df.copy().drop(columns=target)
@@ -808,15 +810,6 @@ if df is not None:
         if scale_all_data:
             scale_method = st.sidebar.selectbox("Méthode de mise à l'échelle à appliquer",
                                                 ["Standard Scaler", "MinMax Scaler", "Robust Scaler", "Quantile Transformer (Uniform)"])
-            if scale_method:
-                if scale_method == "Standard Scaler":
-                    scaler = StandardScaler()
-                elif scale_method == "MinMax Scaler":
-                    scaler = MinMaxScaler()
-                elif scale_method == "Robust Scaler":
-                    scaler = RobustScaler()
-                else:
-                    scaler = QuantileTransformer(output_distribution='uniform')
         
         # Obtenir des dataframes distinctes selon les types des données
         if not use_target:
@@ -827,9 +820,7 @@ if df is not None:
             df_cat = df.select_dtypes(exclude=['number'])
         
         # Sélection des variables à encoder
-        have_to_encode = False
         if df_cat.shape[1] > 0:
-            have_to_encode = True
             st.sidebar.subheader("Encodage des variables catégorielles")
             list_binary = None
             list_nominal = None
@@ -1036,90 +1027,51 @@ if df is not None:
         valid_mod = st.sidebar.button("Valider les choix de modélisation")
 
 if valid_wrang:
-    # Faire les traitements selon si split_data = True
-    if split_data:
-        df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
-        
-        # Suppression des doublons
-        if drop_dupli:
-            df_train.drop_duplicates()
-        
-        # Etude des valeurs manquantes    
-        if not use_target:
-            df_train = df_train.dropna(subset=[target])
-        corr_mat, prop_nan = correlation_missing_values(df_train)
-        
-        # Détecter les outliers
-        df_outliers = detect_outliers_iforest_lof(df_train, target)    
-        
-        # Appliquer l'encodage des variables (binaire, ordinal, nominal)
-        if have_to_encode:
-            df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
-        else:
-            df_encoded = df_outliers.copy()
-            
-        # Imputer les valeurs manquantes
-        df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan) 
-    
-        # Mettre à l'échelle les données
-        if scale_all_data:
-            if scale_method:
-                if not use_target:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                            columns=df_imputed.drop(columns=target).columns,
-                                            index=df_imputed.index)
-                    df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
-                else:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
+    # 1. Analyser la corrélation des valeurs manquantes
+    if not use_target:
+        df = df.dropna(subset=[target])
+    corr_mat, prop_nan = correlation_missing_values(df)
 
-            else:
-                st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
-                
-        # Appliquer les transformations individuelles
-        if not scale_all_data:
-            df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
-    
+    # 2. Détecter les outliers
+    df_outliers = detect_outliers_iforest_lof(df, target)
+
+    # 3. Appliquer l'encodage des variables (binaire, ordinal, nominal)
+    if df_cat.shape[1] > 0:
+        df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
     else:
-        # Suppression des doublons
-        if drop_dupli:
-            df.drop_duplicates()
+        df_encoded = df_outliers.copy()
         
-        # Etude des valeurs manquantes     
-        if not use_target:
-            df = df.dropna(subset=[target])
-        corr_mat, prop_nan = correlation_missing_values(df)
-    
-        # Détecter les outliers
-        df_outliers = detect_outliers_iforest_lof(df, target)    
-    
-        # Appliquer l'encodage des variables (binaire, ordinal, nominal)
-        if have_to_encode:
-            df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
-        else:
-            df_encoded = df_outliers.copy()
-            
-        # Imputer les valeurs manquantes
-        df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
-        
-        # Mettre à l'échelle les données
-        if scale_all_data:
-            if scale_method:
-                if not use_target:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                            columns=df_imputed.drop(columns=target).columns,
-                                            index=df_imputed.index)
-                    df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
-                else:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
+    # 4. Imputer les valeurs manquantes
+    df_encoded = df_encoded.dropna(subset=[target])
+    df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
 
+    # 5. Mettre à l'échelle les données
+    if scale_all_data:
+        if scale_method:
+            if scale_method == "Standard Scaler":
+                scaler = StandardScaler()
+            elif scale_method == "MinMax Scaler":
+                scaler = MinMaxScaler()
+            elif scale_method == "Robust Scaler":
+                scaler = RobustScaler()
             else:
-                st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
-    
-        # Appliquer les transformations individuelles
-        if not scale_all_data:
-            df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+                scaler = QuantileTransformer(output_distribution='uniform')
+        
             
+            if not use_target:
+                df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
+                                        columns=df_imputed.drop(columns=target).columns,
+                                        index=df_imputed.index)
+                df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
+            else:
+                df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
 
+        else:
+            st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
+        
+    # Appliquer les transformations individuelles
+    if not scale_all_data:
+        df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
     
     # Application de l'ACP en fonction du choix de l'utilisateur
     if use_pca:
@@ -1149,7 +1101,7 @@ if valid_wrang:
         
         df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
         if df_target is not None:
-            df_scaled = pd.concat([df_pca, df_target], axis=1)
+            df_scaled = mpd.concat([df_pca, df_target], axis=1)
         else:
             df_scaled = df_pca.copy()
             
