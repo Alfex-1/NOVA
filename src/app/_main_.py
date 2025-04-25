@@ -1,7 +1,6 @@
 # Imports
 import numpy as np
 import pandas as pd
-import modin.pandas as mpd
 from matplotlib import pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -85,7 +84,7 @@ def encode_data(df: pd.DataFrame,
         encoded_cols = encoder.get_feature_names_out(list_binary)
         encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
         df.drop(columns=list_binary, inplace=True)
-        df = mpd.concat([df, encoded_df], axis=1)
+        df = pd.concat([df, encoded_df], axis=1)
 
     # Ordinal
     if list_ordinal:
@@ -103,7 +102,7 @@ def encode_data(df: pd.DataFrame,
         encoded_cols = encoder.get_feature_names_out(list_nominal)
         encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
         df.drop(columns=list_nominal, inplace=True)
-        df = mpd.concat([df, encoded_df], axis=1)
+        df = pd.concat([df, encoded_df], axis=1)
 
     return df
 
