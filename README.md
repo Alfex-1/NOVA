@@ -23,7 +23,6 @@ Pour pouvoir exécuter les script sur votre machine personnelle :
    
 ## Structure du dépôt 
 
-- __docs__ : Le logo de NOVA en format png.  
 - __src__ :  
     - **`\app`**
         - **`\_main_.py`** : Script utilisé pour le fonctionnement de l'application
