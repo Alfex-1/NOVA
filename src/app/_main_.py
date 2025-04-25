@@ -1,5 +1,4 @@
 # Imports
-# from tools.utils import *
 import numpy as np
 import pandas as pd
 import modin.pandas as mpd
@@ -24,12 +23,13 @@ import lightgbm as lgb
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import SuccessiveHalvingPruner
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, get_scorer
 import io
 from io import BytesIO
 import os
 import streamlit as st
 from PIL import Image
+from joblib import Parallel, delayed
 
 
 def correlation_missing_values(df: pd.DataFrame):
@@ -554,14 +554,19 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
     # Retourner la performance (ici on maximise la précision, mais à ajuster selon le modèle)
     return np.mean(cv_results['test_score'])
 
-def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_quared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
-    study = optuna.create_study(direction='maximize',
-                                sampler=TPESampler(prior_weight=0.5, n_startup_trials=10,
-                                                   n_ei_candidates=12,warn_independent_sampling=False,
-                                                   seed=42),
-                                pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
-    study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen, multi_class=multi_class, X=X_train, y=y_train, cv=cv, scoring_comp=scoring), n_trials=n_trials, n_jobs=n_jobs)
-    
+def parallel_objective(trial, task, model_type, multi_class, X, y, cv, scoring_comp):
+    return objective(trial, task=task, model_type=model_type, multi_class=multi_class, X=X, y=y, cv=cv, scoring_comp=scoring_comp)
+
+def optimize_model_parallel(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_squared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
+    study = optuna.create_study(direction='maximize', sampler=TPESampler(prior_weight=0.5, n_startup_trials=10, n_ei_candidates=12, warn_independent_sampling=False, seed=42), pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
+
+    # Parallélisation de l'optimisation avec joblib
+    results = Parallel(n_jobs=n_jobs)(delayed(parallel_objective)(trial, task, model_choosen, multi_class, X_train, y_train, cv, scoring) for trial in study.ask(n_trials))
+
+    # Calcul des résultats
+    for result in results:
+        study.tell(result)
+
     # Créer le modèle avec les meilleurs hyperparamètres
     if model_choosen == "LightGBM":
         best_model = lgb.LGBMRegressor(**study.best_params, verbose=-1) if task == 'Regression' else lgb.LGBMClassifier(**study.best_params, verbose=-1)
@@ -570,7 +575,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     elif model_choosen == "Random Forest":
         best_model = RandomForestRegressor(**study.best_params) if task == 'Regression' else RandomForestClassifier(**study.best_params)
     elif model_choosen == "Linear Regression":
-        # Gestion des régressions linéaires et régularisées
         if "model" in study.best_params and study.best_params["model"] == "linear":
             best_model = LinearRegression()
         elif "model" in study.best_params and study.best_params["model"] == "ridge":
@@ -583,86 +587,115 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         best_model = LogisticRegression(**study.best_params, max_iter=10000, n_jobs=-1)
     elif model_choosen == "KNN":
         best_model = KNeighborsRegressor(**study.best_params) if task == 'Regression' else KNeighborsClassifier(**study.best_params)
-    
+
     # Retourner le modèle avec les meilleurs hyperparamètres et les résultats
     best_params = study.best_params
     best_value = study.best_value
     
     return best_model, best_params, best_value
 
-def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
-    """Calcule le biais et la variance d'un estimateur via une décomposition par validation croisée.
-
-    Cette fonction effectue une décomposition du biais et de la variance d'un modèle d'estimation en utilisant 
-    la validation croisée (KFold). Elle permet d'évaluer la performance de l'estimateur en termes de biais et 
-    de variance en fonction de la tâche (régression ou classification).
+def evaluate_and_decompose(models, X, y, task, scoring_dict, cv=5, n_jobs=-1, random_seed=None):
+    """
+    Combine validation croisée et calcul du biais/variance en une seule fonction optimisée.
 
     Args:
-        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer.
-        X (array-like, shape (n_samples, n_features)): Matrices de caractéristiques, où chaque ligne est une 
-                                                      observation et chaque colonne est une caractéristique.
-        y (array-like, shape (n_samples,)): Vecteur ou matrice des valeurs cibles (vérités terrain), qui 
-                                            varient en fonction de la tâche (régression ou classification).
-        task (str): Type de tâche, soit "Classification", soit "Regression". Cela détermine le calcul du biais 
-                    et de la variance.
-        cv (int, optional): Nombre de divisions (splits) pour la validation croisée. Par défaut à 5.
-        random_seed (int, optional): Seed pour le générateur aléatoire, utile pour reproduire les résultats. 
-                                     Par défaut à None.
+        models (dict): Dictionnaire {index: modèle sklearn instancié}
+        X (array-like): Features
+        y (array-like): Target
+        task (str): "Regression" ou "Classification"
+        scoring_dict (dict): Dictionnaire des métriques (nom lisible -> nom sklearn)
+        cv (int): Nombre de folds pour la validation croisée
+        n_jobs (int): Nombre de jobs pour joblib
+        random_seed (int): Seed aléatoire
 
     Returns:
-        tuple: Un tuple contenant les valeurs suivantes :
-            - avg_expected_loss (float): Perte moyenne (erreur quadratique moyenne pour la régression, erreur 
-                                          de classification pour la classification).
-            - avg_bias (float): Biais moyen (écart moyen entre les prédictions et les valeurs réelles).
-            - avg_var (float): Variance moyenne des prédictions.
-            - bias_relative (float): Biais relatif, normalisé par rapport à l'écart-type de la cible (régression) 
-                                     ou au nombre de classes (classification).
-            - var_relative (float): Variance relative des prédictions par rapport à la variance de la cible 
-                                     (régression) ou au nombre de classes (classification).
+        df_scores (pd.DataFrame): Résultats des scores moyens et std
+        df_bias_var (pd.DataFrame): Résultats biais/variance
     """
-    # Initialisation
     rng = np.random.RandomState(random_seed)
     kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
+    folds = list(kf.split(X))
 
-    all_pred = []
-    y_tests = []
+    def process_model(idx, model):
+        preds_all = []
+        truths_all = []
+        fold_scores = []
 
-    # Boucle sur les folds de validation croisée
-    for train_idx, test_idx in kf.split(X):
-        X_train_fold, X_test_fold = X[train_idx], X[test_idx]
-        y_train_fold, y_test_fold = y[train_idx], y[test_idx]
-        model = estimator.fit(X_train_fold, y_train_fold)
-        preds = model.predict(X_test_fold)
-        
-        all_pred.append(preds)
-        y_tests.append(y_test_fold)
+        for train_idx, test_idx in folds:
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
 
-    all_pred = np.concatenate(all_pred)
-    y_tests = np.concatenate(y_tests)
+            mdl = model.fit(X_train, y_train)
+            y_pred = mdl.predict(X_test)
 
-    if task == "Classification":
-        # Classification : calcul de la majorité des prédictions (mode)
-        main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
-        avg_expected_loss = np.mean(all_pred != y_tests)
-        avg_bias = np.mean(main_predictions != y_tests)
-        avg_var = np.mean((all_pred != main_predictions).astype(int))
+            preds_all.append(y_pred)
+            truths_all.append(y_test)
 
-        # Calcul du biais et de la variance relatifs
-        bias_relative = np.mean(main_predictions != y_tests) / len(np.unique(y_tests))  # Par rapport au nombre de classes
-        var_relative = np.mean((all_pred != main_predictions).astype(int)) / len(np.unique(y_tests))  # Par rapport au nombre de classes
-        
-    else:
-        # Régression : calcul de la moyenne des prédictions
-        main_predictions = np.mean(all_pred, axis=0)
-        avg_expected_loss = np.mean((all_pred - y_tests) ** 2)
-        avg_bias = np.mean(main_predictions - y_tests)
-        avg_var = np.mean((all_pred - main_predictions) ** 2)
+            scores = {}
+            for name, scorer_name in scoring_dict.items():
+                scorer = get_scorer(scorer_name)
+                val = scorer(mdl, X_test, y_test)
+                scores[name] = val
+            fold_scores.append(scores)
 
-        # Calcul du biais et de la variance relatifs
-        bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
-        var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
+        # Préparation des scores moyens et std
+        scores_df = pd.DataFrame(fold_scores)
+        mean_scores = scores_df.mean()
+        std_scores = scores_df.std()
 
-    return avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
+        preds_all = np.concatenate(preds_all)
+        truths_all = np.concatenate(truths_all)
+
+        # Calcul biais/variance
+        if task == "Classification":
+            preds_all_reshaped = np.array(preds_all).reshape(cv, -1).astype(int)
+            main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=preds_all_reshaped)
+            avg_expected_loss = np.mean(preds_all != truths_all)
+            avg_bias = np.mean(main_predictions != truths_all)
+            avg_var = np.mean((preds_all_reshaped != main_predictions).astype(int))
+            n_classes = len(np.unique(truths_all))
+            bias_relative = avg_bias / n_classes
+            var_relative = avg_var / n_classes
+        else:
+            preds_all_reshaped = np.array(preds_all).reshape(cv, -1)
+            main_predictions = np.mean(preds_all_reshaped, axis=0)
+            avg_expected_loss = np.mean((preds_all - truths_all) ** 2)
+            avg_bias = np.mean(main_predictions - truths_all)
+            avg_var = np.mean((preds_all - main_predictions) ** 2)
+            bias_relative = avg_bias / np.std(truths_all)
+            var_relative = avg_var / np.var(truths_all)
+
+        # Conclusion biais/variance
+        if abs(bias_relative) > 0.2 and var_relative > 0.2:
+            conclusion = "Problème majeur : le modèle est vraisemblablement pas adapté"
+        elif abs(bias_relative) > 0.2:
+            conclusion = "Biais élevé : suspicion de sous-ajustement"
+        elif var_relative > 0.2:
+            conclusion = "Variance élevée : suspicion de sur-ajustement"
+        else:
+            conclusion = "Bien équilibré"
+
+        return {
+            'Model Index': idx,
+            **{f"Mean - {k}": round(v * 100, 2) if task == "Classification" else round(-v, 3) for k, v in mean_scores.items()},
+            **{f"Std - {k}": round(std_scores[k], 5) for k in scoring_dict.keys()},
+            'Bias': round(avg_bias, 3),
+            'Variance': round(avg_var, 3),
+            'Bias Relative': round(bias_relative, 3),
+            'Variance Relative': round(var_relative, 3),
+            'Conclusion': conclusion
+        }
+
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_model)(idx, model) for idx, model in models.items()
+    )
+
+    df = pd.DataFrame(results).set_index("Model Index")
+    score_cols = [col for col in df.columns if col.startswith("Mean") or col.startswith("Std")]
+    bias_var_cols = ['Bias', 'Variance', 'Bias Relative', 'Variance Relative', 'Conclusion']
+
+    return df[score_cols], df[bias_var_cols]
+
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
@@ -1255,93 +1288,37 @@ if valid_mod:
     # 7. Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
 
-    list_score = []
-    for model in list_models:  # Utilise les vrais objets modèles
-        scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
-        mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
-        std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
-
-        list_score.append({
-            'Best Model': str(model),  # Affichage du nom seulement
-            'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
-            'Std Scores': std_scores
-        })
-
-    df_score = pd.DataFrame(list_score)  
-
-    # Dictionnaires des métriques
-    metrics_regression = {
-        "R² Score": "r2",
-        "Mean Squared Error": "neg_mean_squared_error",
-        "Root Mean Squared Error": "neg_root_mean_squared_error",
-        "Mean Absolute Error": "neg_mean_absolute_error",
-        "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
-    }
-
-    metrics_classification = {
-        "Accuracy": "accuracy",
-        "F1 Score (Weighted)": "f1_weighted",
-        "Precision (Weighted)": "precision_weighted",
-        "Recall (Weighted)": "recall_weighted"
-    }
-
-    # Inverser les dictionnaires des métriques
-    inv_metrics = {v: k for k, v in metrics_regression.items()} if task == "Regression" else {v: k for k, v in metrics_classification.items()}
-
-    for metric in scoring_eval:
-        df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
-        df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
-        
-    # Renommage des colonnes pour des noms plus lisibles
-    for metric in scoring_eval:
-        clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
-        df_score.rename(columns={
-            f"Mean {metric}": f"Mean - {clean_metric}",
-            f"Std {metric}": f"Std - {clean_metric}"
-        }, inplace=True)
-
-    # Derniers traitement
-    df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-    df_score.index = df_train2.index
-    df_score2 = df_score.drop(columns='Best Model')
-    st.subheader("Validation des modèles")
-    st.dataframe(df_score2, use_container_width=True)
-    
-    # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
-    bias_variance_results = []
-    for idx, best_model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train2, task)
-        expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
-            model, task=task,
-            X=X_train.values, y=y_train.values,
-            cv=cv)
-
-        # Création d'un dictionnaire pour stocker les résultats
-        result = {
-            "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
-            "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
-            "Bias Relative": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
-            "Variance Relative": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+    # Dictionnaire des métriques
+    if task == "Regression":
+        scoring_dict = {
+            "R² Score": "r2",
+            "Mean Squared Error": "neg_mean_squared_error",
+            "Root Mean Squared Error": "neg_root_mean_squared_error",
+            "Mean Absolute Error": "neg_mean_absolute_error",
+            "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
+        }
+    else:
+        scoring_dict = {
+            "Accuracy": "accuracy",
+            "F1 Score (Weighted)": "f1_weighted",
+            "Precision (Weighted)": "precision_weighted",
+            "Recall (Weighted)": "recall_weighted"
         }
         
-        # Logique de conclusion en fonction du biais relatif et de la variance relative
-        if abs(bias_relative) > 0.2 and var_relative > 0.2:
-            result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
-        elif abs(bias_relative) > 0.2:
-            result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
-        elif var_relative > 0.2:
-            result["Conclusion"] = "Variance élevée : suspicion de sur-ajustement"
-        else:
-            result["Conclusion"] = "Bien équilibré"
+    df_scores, df_bias_variance = evaluate_and_decompose(
+        models=list_models,
+        X=X_train,  # ou X selon comment tu appelles tes données
+        y=y_train,
+        task=task,
+        scoring_dict=scoring_dict,
+        cv=cv,
+        n_jobs=-1,
+        random_seed=42)                
         
-        # Ajout du dictionnaire à la liste des résultats
-        bias_variance_results.append(result)            
-        
-    # Création du DataFrame
-    df_bias_variance = pd.DataFrame(bias_variance_results)
-    df_bias_variance.index = df_train2.index
+    # Affichage ou export, selon ce que tu veux en faire
+    st.subheader("Validation des modèles")
+    st.dataframe(df_scores)
 
-    # Affichage dans Streamlit
     st.subheader("Etude Bias-Variance")
     st.dataframe(df_bias_variance)
 
