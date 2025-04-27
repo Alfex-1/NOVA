@@ -509,6 +509,7 @@ def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, t
     df_train = df_train.copy()
     df_test = df_test.copy() if df_test is not None else None
 
+    # Assurer que l'indice est le même pour df_train et features
     features = df_train.drop(columns=[target], errors='ignore').select_dtypes(include=[np.number])
     valid_idx = features.dropna().index
     features = features.loc[valid_idx]
@@ -522,9 +523,11 @@ def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, t
     lof = LocalOutlierFactor(n_neighbors=20, contamination=contamination)
     out_lof = lof.fit_predict(features)
 
+    # Aligner l'index de outliers avec df_train
     outliers = ((out_iso == -1) & (out_lof == -1)).astype(int)
+    outliers = pd.Series(outliers, index=features.index)  # S'assurer que l'index est le même
 
-    # Vérifier la cohérence de la dimension des outliers
+    # Vérifier la cohérence des indices
     assert outliers.shape[0] == df_train.shape[0], f"Mismatch in number of rows: {outliers.shape[0]} vs {df_train.shape[0]}"
 
     # Définir bornes winsorization sur train
