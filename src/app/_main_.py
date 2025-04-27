@@ -524,6 +524,9 @@ def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, t
 
     outliers = ((out_iso == -1) & (out_lof == -1)).astype(int)
 
+    # Vérifier la cohérence de la dimension des outliers
+    assert outliers.shape[0] == df_train.shape[0], f"Mismatch in number of rows: {outliers.shape[0]} vs {df_train.shape[0]}"
+
     # Définir bornes winsorization sur train
     bounds = {}
     for col in features.columns:
