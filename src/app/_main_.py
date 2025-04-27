@@ -959,14 +959,14 @@ if df is not None:
         # Demander s'il faut demander de diviser la base
         split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
         
-        # Demander si l'utilisateur souhaite supprimer les doublons
-        drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
-        
         if split_data:
             test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
             test_size = test_size/100
-            
+            # Division
             df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
+        
+        # Demander si l'utilisateur souhaite supprimer les doublons
+        drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
         
         pb = False
         wrang_finished = False
