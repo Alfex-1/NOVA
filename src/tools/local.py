@@ -5,7 +5,7 @@ import seaborn as sns
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
 from scipy import stats
 from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
@@ -19,9 +19,10 @@ from sklearn.inspection import permutation_importance
 import xgboost as xgb
 import optuna
 from optuna.samplers import TPESampler
-from optuna.pruners import HyperbandPruner
-from sklearn.metrics import confusion_matrix
+from optuna.pruners import SuccessiveHalvingPruner
+from sklearn.metrics import confusion_matrix, get_scorer
 import lightgbm as lgb
+from joblib import Parallel, delayed
 
 def correlation_missing_values(df: pd.DataFrame):
     """
@@ -53,7 +54,52 @@ def correlation_missing_values(df: pd.DataFrame):
 
     return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
+def encode_data(df: pd.DataFrame,
+                list_binary: list[str] = None,
+                list_ordinal: list[str] = None,
+                list_nominal: list[str] = None,
+                ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
+    """
+    Encode les variables catégorielles du DataFrame selon leur nature.
+    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable conservée)
+    - Ordinale : mapping dict ou OrdinalEncoder
+    - Nominale : OneHotEncoder classique (toutes les modalités)
+    
+    Returns:
+        DataFrame encodé
+    """
+    df = df.copy()
+
+    # Binaire
+    if list_binary:
+        encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
+        encoded_array = encoder.fit_transform(df[list_binary])
+        encoded_cols = encoder.get_feature_names_out(list_binary)
+        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
+        df.drop(columns=list_binary, inplace=True)
+        df = pd.concat([df, encoded_df], axis=1)
+
+    # Ordinal
+    if list_ordinal:
+        for col in list_ordinal:
+            if ordinal_mapping and col in ordinal_mapping:
+                df[col] = df[col].map(ordinal_mapping[col])
+            else:
+                encoder = OrdinalEncoder()
+                df[col] = encoder.fit_transform(df[[col]])
+
+    # Nominal
+    if list_nominal:
+        encoder = OneHotEncoder(drop=None, sparse_output=False)
+        encoded_array = encoder.fit_transform(df[list_nominal])
+        encoded_cols = encoder.get_feature_names_out(list_nominal)
+        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
+        df.drop(columns=list_nominal, inplace=True)
+        df = pd.concat([df, encoded_df], axis=1)
+
+    return df
+
+def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
     Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
 
@@ -73,14 +119,14 @@ def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: l
         pd.DataFrame: Le DataFrame encodé avec les transformations appliquées.
     """    
     # Encodage binaire (OneHot) pour les variables binaires
-    if list_binary is not None:
+    if list_binary is not None and len(list_binary) > 0:
         onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_binary)], 
                                   remainder='passthrough')
         df = onehot.fit_transform(df)
         df = pd.DataFrame(df, columns=onehot.get_feature_names_out(list_binary))
     
     # Encodage ordinal pour les variables ordinales
-    if list_ordinal is not None:
+    if list_ordinal is not None and len(list_ordinal) > 0:
         for col in list_ordinal:
             if ordinal_mapping is not None and col in ordinal_mapping:
                 # Appliquer le mapping d'ordinal
@@ -91,7 +137,7 @@ def encode_data(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: l
                 df[col] = encoder.fit_transform(df[[col]])
     
     # Encodage non-ordinal (OneHot) pour les variables nominales
-    if list_nominal is not None:
+    if list_nominal is not None and len(list_nominal) > 0:
         onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_nominal)], 
                                 remainder='passthrough')
         df = onehot.fit_transform(df)
@@ -231,47 +277,151 @@ def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
     
     return df
 
-def scale_data(df: pd.DataFrame, list_standard: list[str] = None, list_minmax: list[str] = None, list_robust: list[str] = None, list_quantile: list[str] = None):   
+def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
     """
-    Applique différentes méthodes de mise à l'échelle sur les colonnes spécifiées d'un DataFrame.
+    Detects outliers in a dataset using Isolation Forest and Local Outlier Factor (LOF) methods.
+    The outliers are identified based on the combination of results from both methods, and can be either replaced using winsorization or removed based on a predefined threshold.
 
     Args:
-        df (pd.DataFrame): Le DataFrame contenant les données à transformer.
-        list_standard (list[str], optional): Liste des colonnes à standardiser (Z-score). 
-            La standardisation centre les données en moyenne 0 et écart-type 1. Defaults to None.
-        list_minmax (list[str], optional): Liste des colonnes à normaliser avec Min-Max Scaling. 
-            Transforme les données pour qu'elles soient dans l'intervalle [0, 1]. Defaults to None.
-        list_robust (list[str], optional): Liste des colonnes à transformer avec RobustScaler. 
-            Échelle robuste aux outliers basée sur le médian et l'IQR (Interquartile Range). Defaults to None.
-        list_quantile (list[str], optional): Liste des colonnes à transformer avec QuantileTransformer. 
-            Transforme les données en suivant une distribution uniforme. Defaults to None.
+        df (pd.DataFrame): The input DataFrame containing the data, including both numerical features and the target variable.
+        target (str): The name of the target variable column in the DataFrame, which will be excluded from outlier detection.
+
+    Raises:
+        ValueError: If the DataFrame does not contain any numeric columns after removing the target variable or has missing data.
 
     Returns:
-        pd.DataFrame: Le DataFrame avec les colonnes mises à l'échelle selon les transformations spécifiées.
+        pd.DataFrame: The input DataFrame with outliers flagged and handled (either winsorized or removed). A new column 'outlier' will indicate the final outliers after combining the results of both methods.
     """
-    # Standardisation (Z-score)
-    if list_standard is not None:
-        scaler = StandardScaler()
-        df[list_standard] = scaler.fit_transform(df[list_standard])
     
-    # Min-Max Scaling
-    if list_minmax is not None:
-        scaler = MinMaxScaler()
-        df[list_minmax] = scaler.fit_transform(df[list_minmax])
+    # Sélectionner uniquement les colonnes numériques
+    df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
     
-    # Robust Scaling
-    if list_robust is not None:
-        scaler = RobustScaler()
-        df[list_robust] = scaler.fit_transform(df[list_robust])
+    # Index des lignes valides (sans NaN dans les colonnes numériques)
+    valid_rows = df_numeric.dropna().index  
+    df_numeric = df_numeric.loc[valid_rows]  
+
+    if df_numeric.shape[1] == 0:
+        raise ValueError("Aucune colonne numérique dans le DataFrame.")
+
+    # Détection des outliers avec Isolation Forest
+    iforest = IsolationForest(n_estimators=500, contamination='auto', random_state=42, n_jobs=-1)
+    df.loc[valid_rows, 'outlier_iforest'] = iforest.fit_predict(df_numeric)
+    df['outlier_iforest'] = np.where(df['outlier_iforest'] == -1, 1, 0)
     
-    # Quantile Transformation
-    if list_quantile is not None:
-        scaler = QuantileTransformer(output_distribution='uniform')
-        df[list_quantile] = scaler.fit_transform(df[list_quantile])
+    # Détection avec Local Outlier Factor
+    lof = LocalOutlierFactor(n_neighbors=20, contamination='auto')
+    outliers_lof = lof.fit_predict(df_numeric)  # Génère uniquement pour les lignes valides
+    df.loc[valid_rows, 'outlier_lof'] = np.where(outliers_lof == -1, 1, 0)
+
+    # Fusion des résultats
+    df['outlier'] = ((df['outlier_iforest'] == 1) & (df['outlier_lof'] == 1)).astype(int)
+    df = df.drop(columns=['outlier_lof', 'outlier_iforest'])
+
+    # Calcul de la proportion d'outliers détectés par les deux algos
+    proportion_outliers = df['outlier'].sum() / len(df)
+
+    # Suppression ou remplacement des outliers (winsorisation)
+    seuil = max(0.01 * len(df), 1)
+    if df['outlier'].sum() > seuil:
+        for col in df_numeric.columns:
+            # Appliquer la winsorisation aux outliers avec la proportion calculée
+            df[col] = winsorize(df[col], limits=[proportion_outliers, proportion_outliers])  # Limites ajustées selon proportion_outliers
+    else:
+        df = df[df['outlier'] == 0]
     
+    df = df.drop(columns='outlier')
+        
     return df
 
+def transform_data(split_data: bool, df: pd.DataFrame = None, df_train: pd.DataFrame = None, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
+    """
+    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées,
+    avec gestion optionnelle des ensembles d'entraînement et de test pour éviter toute fuite de données.
+
+    Args:
+        split_data (bool): 
+            Indique si les données sont séparées en df_train et df_test. Si False, 'df' est utilisé pour transformation globale.
+        df (pd.DataFrame, optional): 
+            DataFrame complet à transformer si split_data=False. Ignoré sinon.
+        df_train (pd.DataFrame, optional): 
+            DataFrame d'entraînement à transformer si split_data=True.
+        df_test (pd.DataFrame, optional): 
+            DataFrame de test à transformer si split_data=True.
+        list_boxcox (list[str], optional): 
+            Liste des colonnes sur lesquelles appliquer la transformation de Box-Cox (valeurs strictement positives).
+        list_yeo (list[str], optional): 
+            Liste des colonnes sur lesquelles appliquer la transformation de Yeo-Johnson (valeurs quelconques).
+        list_log (list[str], optional): 
+            Liste des colonnes à transformer via logarithme naturel (valeurs strictement positives).
+        list_sqrt (list[str], optional): 
+            Liste des colonnes à transformer via racine carrée (valeurs ≥ 0).
+
+    Returns:
+        pd.DataFrame or tuple(pd.DataFrame, pd.DataFrame): 
+            - Si split_data=False : retourne le DataFrame transformé (df).
+            - Si split_data=True : retourne un tuple (df_train, df_test) transformés.
+    """
+    # Box-Cox Transformation
+    if list_boxcox and len(list_boxcox) > 0:
+        transformer_bc = PowerTransformer(method='box-cox')
+        
+        if split_data:
+            transformer_bc.fit(df_train[list_boxcox])
+            df_train[list_boxcox] = transformer_bc.transform(df_train[list_boxcox])
+            df_test[list_boxcox] = transformer_bc.transform(df_test[list_boxcox])
+        else:
+            df[list_boxcox] = transformer_bc.fit_transform(df[list_boxcox])
+
+    # Yeo-Johnson Transformation
+    if list_yeo and len(list_yeo) > 0:
+        transformer_yeo = PowerTransformer(method='yeo-johnson')
+        
+        if split_data:
+            transformer_yeo.fit(df_train[list_yeo])
+            df_train[list_yeo] = transformer_yeo.transform(df_train[list_yeo])
+            df_test[list_yeo] = transformer_yeo.transform(df_test[list_yeo])
+        else:
+            df[list_yeo] = transformer_yeo.fit_transform(df[list_yeo])
+    
+    # Logarithmic Transformation
+    if list_log and len(list_log) > 0:
+        if split_data:
+            for col in list_log:
+                df_train[col] = np.log(df_train[col])
+                df_test[col] = np.log(df_test[col])
+        else:        
+            for col in list_log:
+                df[col] = np.log(df[col])
+
+    # Square Root Transformation
+    if list_sqrt and len(list_sqrt) > 0:
+        if split_data:
+            for col in list_sqrt:
+                df_train[col] = np.sqrt(df_train[col])
+                df_test[col] = np.sqrt(df_test[col])
+        else:
+            for col in list_sqrt:
+                df[col] = np.sqrt(df[col])
+    
+    if split_data:
+        return df_train, df_test
+    else:
+        return df
+
 def calculate_inertia(X):
+    """
+    Calcule l'inertie (variance expliquée) de la dernière composante principale ajoutée à chaque étape
+    de l'ACP, en augmentant progressivement le nombre de composantes.
+
+    Args:
+        X (np.ndarray or pd.DataFrame): 
+            Matrice des données (features uniquement), à transformer via ACP.
+
+    Returns:
+        list[float]: 
+            Liste des pourcentages de variance expliquée par la dernière composante ajoutée à chaque itération 
+            (de 1 à n_features).
+    """
     inertias = []
     for i in range(1, X.shape[1] + 1):
         pca = PCA(n_components=i)
@@ -292,7 +442,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'subsample': trial.suggest_float('subsample', 0.5, 1.0, step=0.01),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0, step=0.01),
         }
-        model = lgb.LGBMRegressor(**param, verbose=-1) if task == 'Regression' else lgb.LGBMClassifier(**param, verbose=-1)
+        model = lgb.LGBMRegressor(random_state=42, **param, verbose=-1, n_jobs=-1) if task == 'Regression' else lgb.LGBMClassifier(random_state=42, **param, verbose=-1, n_jobs=-1)
 
     elif model_type == "XGBoost":
         # Déterminer l'objectif et les métriques selon la tâche
@@ -324,10 +474,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             param['num_class'] = num_class
 
         # Créer le modèle avec les meilleurs paramètres
-        if task == 'Regression':
-            model = xgb.XGBRegressor(**param)
-        else:
-            model = xgb.XGBClassifier(**param)
+        model = xgb.XGBRegressor(random_state=42, **param, n_jobs=-1) if task == 'Regression' else xgb.XGBClassifier(random_state=42, **param, n_jobs=-1)
 
     elif model_type == "Random Forest":
         param = {
@@ -337,16 +484,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 20),
             'max_features': trial.suggest_categorical('max_features', [None, 'sqrt', 'log2'])
         }
-        model = RandomForestRegressor(**param) if task == 'Regression' else RandomForestClassifier(**param)
-
-    elif model_type == "SVM":
-        param = {
-            'C': trial.suggest_float('C', 0.1, 10.0, log=True),
-            'kernel': trial.suggest_categorical('kernel', ['linear', 'poly', 'rbf', 'sigmoid']),
-            'gamma': trial.suggest_categorical('gamma', ['scale', 'auto']),
-            'degree': trial.suggest_int('degree', 2, 5),
-        }
-        model = SVC(**param) if task == 'Classification' else SVR(**param)
+        model = RandomForestRegressor(random_state=42, **param, n_jobs=-1) if task == 'Regression' else RandomForestClassifier(random_state=42, **param, n_jobs=-1)
 
     elif model_type == "Linear Regression":
         # Définition des hyperparamètres pour la régression linéaire et les modèles régularisés
@@ -358,19 +496,19 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
         elif model_linreg == "ridge":
             ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, log=True)
             ridge_alpha = round(ridge_alpha, 2)
-            model = Ridge(alpha=ridge_alpha)
+            model = Ridge(alpha=ridge_alpha, random_state=42)
 
         elif model_linreg == "lasso":
             lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, log=True)
             lasso_alpha = round(lasso_alpha, 2)
-            model = Lasso(alpha=lasso_alpha)
+            model = Lasso(alpha=lasso_alpha, random_state=42)
 
         elif model_linreg == "elasticnet":
             enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, log=True)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
-            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio)
+            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio, random_state=42)
 
     elif model_type == "Logistic Regression":
         # Paramètres pour la régression logistique
@@ -381,16 +519,16 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
         if penalty == "elasticnet":
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1, step=0.01)
             l1_ratio = round(l1_ratio, 2)
-            model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver='saga', l1_ratio=l1_ratio, max_iter=10000, n_jobs=-1, random_state=42)
         elif penalty == "l1":
             solver = "saga" if multi_class else "liblinear"
-            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
         elif penalty == "l2":
             solver = "saga" if multi_class else "lbfgs"
-            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, C=C, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
         else:
             solver = "saga" if multi_class else "lbfgs"
-            model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1)
+            model = LogisticRegression(penalty=penalty, solver=solver, max_iter=10000, n_jobs=-1, random_state=42)
 
 
     elif model_type == "KNN":
@@ -400,7 +538,7 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             'algorithm': trial.suggest_categorical('algorithm', ['auto', 'ball_tree', 'kd_tree', 'brute']),
             'leaf_size': trial.suggest_int('leaf_size', 10, 50),
         }
-        model = KNeighborsRegressor(**param) if task == 'Regression' else KNeighborsClassifier(**param)
+        model = KNeighborsRegressor(**param, n_jobs=-1) if task == 'Regression' else KNeighborsClassifier(**param, n_jobs=-1)
 
     # Validation croisée pour évaluer le modèle
     cv_results = cross_validate(model, X, y, cv=cv, scoring=scoring_comp, return_train_score=False)
@@ -409,7 +547,11 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
     return np.mean(cv_results['test_score'])
 
 def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.Series, cv: int = 10, scoring: str = "neg_root_mean_quared_error", multi_class: bool = False, n_trials: int = 70, n_jobs: int = -1):
-    study = optuna.create_study(direction='maximize', sampler=TPESampler(n_startup_trials=15), pruner=HyperbandPruner())
+    study = optuna.create_study(direction='maximize',
+                                sampler=TPESampler(prior_weight=0.5, n_startup_trials=10,
+                                                   n_ei_candidates=12,warn_independent_sampling=False,
+                                                   seed=42),
+                                pruner=SuccessiveHalvingPruner(min_resource=1, reduction_factor=3, min_early_stopping_rate=0, bootstrap_count=0))
     study.optimize(lambda trial: objective(trial, task=task, model_type=model_choosen, multi_class=multi_class, X=X_train, y=y_train, cv=cv, scoring_comp=scoring), n_trials=n_trials, n_jobs=n_jobs)
     
     # Créer le modèle avec les meilleurs hyperparamètres
@@ -419,8 +561,6 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
         best_model = xgb.XGBRegressor(**study.best_params) if task == 'Regression' else xgb.XGBClassifier(**study.best_params)
     elif model_choosen == "Random Forest":
         best_model = RandomForestRegressor(**study.best_params) if task == 'Regression' else RandomForestClassifier(**study.best_params)
-    elif model_choosen == "SVM":
-        best_model = SVR(**study.best_params) if task == 'Regression' else SVC(**study.best_params)
     elif model_choosen == "Linear Regression":
         # Gestion des régressions linéaires et régularisées
         if "model" in study.best_params and study.best_params["model"] == "linear":
@@ -442,32 +582,60 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
-    # Vérifier si 'loss' est un DataFrame ou une série et en extraire la valeur
+def evaluate_and_decompose(estimator, X, y, scoring_dict, task, cv=5, random_seed=None):
+    # Initialisation
     rng = np.random.RandomState(random_seed)
-    kf = KFold(n_splits=num_rounds, shuffle=True, random_state=rng)
+    kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
+    
+    # Convertir X et y en tableaux numpy pour éviter l'erreur
+    X = X.to_numpy() if isinstance(X, pd.DataFrame) else X
+    y = y.to_numpy() if isinstance(y, pd.Series) else y
 
+    # Variables pour stocker les prédictions et les vraies valeurs
     all_pred = []
     y_tests = []
-
+    
+    # Variables pour stocker les scores de chaque pli
+    fold_scores = {metric: [] for metric in scoring_dict}
+    
+    # Boucle sur les folds de validation croisée
     for train_idx, test_idx in kf.split(X):
         X_train_fold, X_test_fold = X[train_idx], X[test_idx]
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
+        
+        # Entraînement du modèle
         model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
         
+        # Stockage des prédictions et des vraies valeurs
         all_pred.append(preds)
         y_tests.append(y_test_fold)
+        
+        # Calcul des scores pour chaque métrique
+        for metric, scorer in scoring_dict.items():
+            score = scorer(estimator, X_test_fold, y_test_fold)
+            fold_scores[metric].append(score)
 
+    # Concatenate predictions and true values for global analysis
     all_pred = np.concatenate(all_pred)
     y_tests = np.concatenate(y_tests)
 
+    # Calcul des scores moyens et des écarts types pour chaque métrique
+    mean_scores = {metric: np.mean(fold_scores[metric]) for metric in scoring_dict}
+    std_scores = {metric: np.std(fold_scores[metric]).round(5) for metric in scoring_dict}
+
+    # Calcul du biais et de la variance
     if task == "Classification":
         # Classification : calcul de la majorité des prédictions (mode)
         main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
         avg_expected_loss = np.mean(all_pred != y_tests)
         avg_bias = np.mean(main_predictions != y_tests)
         avg_var = np.mean((all_pred != main_predictions).astype(int))
+
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions != y_tests) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        var_relative = np.mean((all_pred != main_predictions).astype(int)) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        
     else:
         # Régression : calcul de la moyenne des prédictions
         main_predictions = np.mean(all_pred, axis=0)
@@ -475,7 +643,11 @@ def bias_variance_decomp(estimator, X, y, num_rounds=5, random_seed=None):
         avg_bias = np.mean(main_predictions - y_tests)
         avg_var = np.mean((all_pred - main_predictions) ** 2)
 
-    return avg_expected_loss, avg_bias, avg_var
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
+        var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
+
+    return mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
@@ -527,12 +699,6 @@ def instance_model(index, df, task):
         
     elif model_name == 'Logistic Regression':
         model = LogisticRegression(*best_params)
-           
-    elif model_name == 'SVM':
-        if task == 'Classification':
-            model = SVC(**best_params)  # SVC pour classification
-        else:
-            model = SVR(**best_params)  # SVR pour régression
     
     return model
 
@@ -555,9 +721,10 @@ pca_option = "Nombre de composantes"
 
 
 cv = 10
+use_loocv=False
 scoring_comp = "neg_root_mean_squared_error"
 scoring_eval = ['neg_root_mean_squared_error']
-models = ["Linear Regression"]
+models = ["Linear Regression", 'KNN']
 task = "Regression" # "Classification", "Regression"
 if task == "Classification" and len(df[target].unique()) > 2:
     multi_class = True
@@ -690,21 +857,7 @@ print(df_train2)
 # 7. Evaluer les meilleurs modèles
 list_models = df_train['Best Model'].tolist()
 
-list_score = []
-for model in list_models:  # Utilise les vrais objets modèles
-    scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
-    mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
-    std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
-
-    list_score.append({
-        'Best Model': str(model),  # Affichage du nom seulement
-        'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
-        'Std Scores': std_scores
-    })
-
-df_score = pd.DataFrame(list_score)  
-
-# Dictionnaires des métriques
+# Dictionnaire des métriques    
 metrics_regression = {
     "R² Score": "r2",
     "Mean Squared Error": "neg_mean_squared_error",
@@ -720,54 +873,35 @@ metrics_classification = {
     "Recall (Weighted)": "recall_weighted"
 }
 
-# Inverser les dictionnaires des métriques
-inv_metrics_regression = {v: k for k, v in metrics_regression.items()}
-inv_metrics_classification = {v: k for k, v in metrics_classification.items()}
-inv_metrics = inv_metrics_classification if task == "Classification" else inv_metrics_regression
+if task == "Regression":
+    scoring_dict = metrics_regression
+else:
+    scoring_dict = metrics_classification
 
-for metric in scoring_eval:
-    df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
-    df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
+all_results = []    
+for model in list_models:
+    mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative = evaluate_and_decompose(
+        estimator=model,  # Ton modèle
+        X=X_test,              # Données d'entraînement
+        y=y_test,              # Cibles
+        scoring_dict=scoring_dict,  # Dictionnaire des métriques
+        task=task,  # Ou "Regression" si tu utilises un modèle de régression
+        cv=cv,  # Nombre de splits pour la validation croisée
+        random_seed=42  # Graine pour la reproductibilité
+    )
     
-# Renommage des colonnes pour des noms plus lisibles
-for metric in scoring_eval:
-    clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
-    df_score.rename(columns={
-        f"Mean {metric}": f"Mean - {clean_metric}",
-        f"Std {metric}": f"Std - {clean_metric}"
-    }, inplace=True)
-
-# Derniers traitement
-df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
-df_score.index = df_train2.index
-df_score2 = df_score.drop(columns='Best Model')
-print(df_score2)
-
-
-# 8. Calculer le biais et la variance
-bias_variance_results = []
-for idx, best_model in df_score['Best Model'].items():
-    model = instance_model(idx, df_train2, task)
-    expected_loss, bias, var = bias_variance_decomp(
-        model,
-        X=X_train.values, y=y_train.values,
-        num_rounds=cv)
-
-    if task == 'Classification':
-        bias_variance_results.append({
-            # "Average 0-1 Loss": round(expected_loss, 3),
-            "Bias": round(bias, 3),
-            "Variance": round(var, 3)})
-    else:
-        bias_variance_results.append({
-            # "Average Squared Loss": round(expected_loss, 3),
-            "Bias": round(bias, 3),
-            "Variance": round(var, 3)})        
+    all_results.append({
+        'Model': str(model),
+        'Scores': mean_scores,
+        'Std Scores': std_scores,
+        'Avg Expected Loss': avg_expected_loss,
+        'Avg Bias': avg_bias,
+        'Avg Variance': avg_var,
+        'Bias Relative': bias_relative,
+        'Variance Relative': var_relative
+    })
     
-# Création du DataFrame
-df_bias_variance = pd.DataFrame(bias_variance_results)
-df_bias_variance.index = df_train2.index
-print(df_bias_variance)
+final_results_df = pd.DataFrame(all_results)
 
 # 9. Afficher la matrice de confusion  
 if task=='Classification':

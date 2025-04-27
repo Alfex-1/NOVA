@@ -4,18 +4,17 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
 import plotly.express as px
-from sklearn.experimental import enable_iterative_imputer
-from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
 from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
-from sklearn.model_selection import KFold, train_test_split, cross_validate, learning_curve
+from sklearn.model_selection import KFold, train_test_split, cross_validate, learning_curve, cross_val_score
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
 import lightgbm as lgb
@@ -29,82 +28,162 @@ import os
 import streamlit as st
 from PIL import Image
 from joblib import Parallel, delayed
+import zipfile
 
+def load_file(file_data):
+    byte_data = file_data.read()
+    separators = [";", ",", "\t"]
+    detected_sep = None
 
-def correlation_missing_values(df: pd.DataFrame):
+    for sep in separators:
+        try:
+            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            if tmp_df.shape[1] > 1:
+                detected_sep = sep
+                break
+        except Exception:
+            continue
+
+    if detected_sep is not None:
+        return pd.read_csv(BytesIO(byte_data), sep=detected_sep)
+    else:
+        return None
+
+def correlation_missing_values(df_train: pd.DataFrame, df_test: pd.DataFrame = None):
     """
-    Analyse la corrélation entre les valeurs manquantes dans un DataFrame.
+    Analyse la corrélation entre les valeurs manquantes dans deux DataFrames (train et test).
 
     Cette fonction identifie les colonnes contenant des valeurs manquantes, 
-    calcule la proportion de NaN par colonne et retourne la matrice de corrélation 
-    des valeurs manquantes.
+    calcule la proportion de NaN par colonne et retourne les matrices de corrélation 
+    des valeurs manquantes pour les bases d'entraînement, de test et la base combinée.
 
     Args:
-        df (pd.DataFrame): Le DataFrame à analyser.
+        df_train (pd.DataFrame): Le DataFrame d'entraînement
+        df_test (pd.DataFrame, optional): Le DataFrame de test (par défaut None)
 
     Returns:
         tuple: 
-            - pd.DataFrame : Matrice de corrélation (%) des valeurs manquantes entre les colonnes.
-            - pd.DataFrame : Proportion des valeurs manquantes par colonne avec le type de variable.
+            - cor_mat_train : Matrice de corrélation des valeurs manquantes pour df_train
+            - cor_mat_test : Matrice de corrélation des valeurs manquantes pour df_test
+            - cor_mat_combined : Matrice de corrélation des valeurs manquantes pour df_combined (train + test)
+            - prop_nan_train : Proportion des valeurs manquantes pour df_train
+            - prop_nan_test : Proportion des valeurs manquantes pour df_test
+            - prop_nan_combined : Proportion des valeurs manquantes pour df_combined (train + test)
     """
-    # Filtrer les colonnes avec des valeurs manquantes
-    df_missing = df.iloc[:, [i for i, n in enumerate(np.var(df.isnull(), axis=0)) if n > 0]]
     
-    # Calculer la proportion de valeurs manquantes et ajouter le type de variable
-    prop_nan = pd.DataFrame({
-        "NaN proportion": round(df.isnull().sum() / len(df) * 100,2),
-        "Type": df.dtypes.astype(str)
-    })
+    def compute_missing_info(df):
+        # Filtrer les colonnes avec des valeurs manquantes
+        df_missing = df.iloc[:, [i for i, n in enumerate(np.var(df.isnull(), axis=0)) if n > 0]]
+        
+        # Calculer la proportion de valeurs manquantes et ajouter le type de variable
+        prop_nan = pd.DataFrame({
+            "NaN proportion": round(df.isnull().sum() / len(df) * 100, 2),
+            "Type": df.dtypes.astype(str)
+        })
 
-    # Calculer la matrice de corrélation des valeurs manquantes
-    corr_mat = round(df_missing.isnull().corr() * 100, 2)
+        # Calculer la matrice de corrélation des valeurs manquantes
+        corr_mat = round(df_missing.isnull().corr() * 100, 2)
 
-    return corr_mat, prop_nan
+        return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame,
-                list_binary: list[str] = None,
-                list_ordinal: list[str] = None,
-                list_nominal: list[str] = None,
-                ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
+    # Calculs pour df_train
+    cor_mat_train, prop_nan_train = compute_missing_info(df_train)
+
+    # Si df_test existe, calculer aussi pour df_test
+    if df_test is not None:
+        cor_mat_test, prop_nan_test = compute_missing_info(df_test)
+        
+        # Calcul pour la base combinée (train + test)
+        df_combined = pd.concat([df_train, df_test], axis=0)
+        cor_mat_combined, prop_nan_combined = compute_missing_info(df_combined)
+    else:
+        cor_mat_test, prop_nan_test, cor_mat_combined, prop_nan_combined = None, None, cor_mat_train, prop_nan_train
+
+    # Retourner les résultats sous forme de variables séparées
+    return cor_mat_train, cor_mat_test, cor_mat_combined, prop_nan_train, prop_nan_test, prop_nan_combined
+
+def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """
     Encode les variables catégorielles du DataFrame selon leur nature.
-    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable conservée)
-    - Ordinale : mapping dict ou OrdinalEncoder
+    - Binaire : OneHotEncoder avec drop='if_binary' (garde une seule colonne si possible)
+    - Ordinale : Mapping manuel ou OrdinalEncoder
     - Nominale : OneHotEncoder classique (toutes les modalités)
-    
-    Returns:
-        DataFrame encodé
-    """
-    df = df.copy()
 
-    # Binaire
+    Args:
+        df_train: DataFrame d'entraînement
+        df_test: DataFrame de test (optionnel)
+        list_binary: liste des variables binaires
+        list_ordinal: liste des variables ordinales
+        list_nominal: liste des variables nominales
+        ordinal_mapping: dictionnaire pour mapping ordinal (optionnel)
+
+    Returns:
+        df_train_encoded, df_test_encoded (ou None si df_test n'est pas fourni)
+    """
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
+
+    # --- Binaire
     if list_binary:
         encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
-        encoded_array = encoder.fit_transform(df[list_binary])
-        encoded_cols = encoder.get_feature_names_out(list_binary)
-        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
-        df.drop(columns=list_binary, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        encoder.fit(df_train[list_binary])
 
-    # Ordinal
+        encoded_train = pd.DataFrame(
+            encoder.transform(df_train[list_binary]),
+            columns=encoder.get_feature_names_out(list_binary),
+            index=df_train.index
+        )
+
+        df_train.drop(columns=list_binary, inplace=True)
+        df_train = pd.concat([df_train, encoded_train], axis=1)
+
+        if df_test is not None:
+            encoded_test = pd.DataFrame(
+                encoder.transform(df_test[list_binary]),
+                columns=encoder.get_feature_names_out(list_binary),
+                index=df_test.index
+            )
+            df_test.drop(columns=list_binary, inplace=True)
+            df_test = pd.concat([df_test, encoded_test], axis=1)
+
+    # --- Ordinal
     if list_ordinal:
         for col in list_ordinal:
             if ordinal_mapping and col in ordinal_mapping:
-                df[col] = df[col].map(ordinal_mapping[col])
+                df_train[col] = df_train[col].map(ordinal_mapping[col])
+                if df_test is not None:
+                    df_test[col] = df_test[col].map(ordinal_mapping[col])
             else:
                 encoder = OrdinalEncoder()
-                df[col] = encoder.fit_transform(df[[col]])
+                encoder.fit(df_train[[col]])
+                df_train[col] = encoder.transform(df_train[[col]])
+                if df_test is not None:
+                    df_test[col] = encoder.transform(df_test[[col]])
 
-    # Nominal
+    # --- Nominal
     if list_nominal:
         encoder = OneHotEncoder(drop=None, sparse_output=False)
-        encoded_array = encoder.fit_transform(df[list_nominal])
-        encoded_cols = encoder.get_feature_names_out(list_nominal)
-        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
-        df.drop(columns=list_nominal, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        encoder.fit(df_train[list_nominal])
 
-    return df
+        encoded_train = pd.DataFrame(
+            encoder.transform(df_train[list_nominal]),
+            columns=encoder.get_feature_names_out(list_nominal),
+            index=df_train.index
+        )
+
+        df_train.drop(columns=list_nominal, inplace=True)
+        df_train = pd.concat([df_train, encoded_train], axis=1)
+
+        if df_test is not None:
+            encoded_test = pd.DataFrame(
+                encoder.transform(df_test[list_nominal]),
+                columns=encoder.get_feature_names_out(list_nominal),
+                index=df_test.index
+            )
+            df_test.drop(columns=list_nominal, inplace=True)
+            df_test = pd.concat([df_test, encoded_test], axis=1)
+
+    return df_train, df_test if df_test is not None else df_train
 
 def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
@@ -157,284 +236,380 @@ def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: 
         df.index = range(len(df))
             
     return df
+class ParametricImputer:
+    def __init__(self, distribution='norm'):
+        self.distribution = distribution
+        self.fitted = False
+        self.params = {}
 
-def impute_missing_values(df: pd.DataFrame, corr_info: pd.DataFrame, prop_nan: pd.DataFrame):
+    def fit(self, series):
+        if not isinstance(series, pd.Series):
+            raise ValueError("L'entrée doit être une série pandas.")
+        data = series.dropna()
+        if self.distribution == 'norm':
+            mu, sigma = stats.norm.fit(data)
+            self.params = {'mu': mu, 'sigma': sigma}
+            self.fitted = True
+        else:
+            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+
+    def sample(self, size):
+        if not self.fitted:
+            raise RuntimeError("Le fit doit être exécuté avant le sampling.")
+        if self.distribution == 'norm':
+            return stats.norm.rvs(loc=self.params['mu'], scale=self.params['sigma'], size=size)
+        else:
+            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+
+    def transform(self, series):
+        if not self.fitted:
+            raise RuntimeError("Impossible de transformer avant le fit.")
+        missing = series.isnull()
+        n_missing = missing.sum()
+        if n_missing == 0:
+            return series
+        sampled_values = self.sample(n_missing)
+        series_copy = series.copy()
+        series_copy.loc[missing] = sampled_values
+        return series_copy
+
+class MultiParametricImputer:
+    def __init__(self, distribution='norm'):
+        self.distribution = distribution
+        self.imputers = {}
+        self.fitted = False
+
+    def fit(self, df, columns):
+        for col in columns:
+            imputer = ParametricImputer(self.distribution)
+            imputer.fit(df[col])
+            self.imputers[col] = imputer
+        self.fitted = True
+
+    def transform(self, df):
+        if not self.fitted:
+            raise RuntimeError("Tu dois fitter avant de transformer.")
+        df_copy = df.copy()
+        for col, imputer in self.imputers.items():
+            df_copy[col] = imputer.transform(df_copy[col])
+        return df_copy
+    
+def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
     """
-    Impute les valeurs manquantes dans un DataFrame en fonction des proportions et des corrélations.
+    Impute les valeurs manquantes des colonnes sélectionnées en utilisant des modèles supervisés (arbres de décision).
 
-    Cette fonction impute automatiquement les valeurs manquantes pour chaque variable du DataFrame
-    en analysant la proportion de valeurs manquantes et la force moyenne de corrélation (en valeur absolue)
-    entre les variables. Selon ces indicateurs, différentes stratégies d'imputation sont appliquées :
-      - Pour les variables avec moins de 10% de valeurs manquantes :
-          • Si la force de corrélation est très faible (< 2), on utilise SimpleImputer avec la stratégie
-            'most_frequent' pour les variables de type 'object' ou 'median' pour les variables numériques.
-          • Si la force de corrélation est modérée (entre 2 et 5), on applique KNNImputer.
-          • Si la force de corrélation est élevée (entre 5 et 7), on utilise IterativeImputer avec des paramètres par défaut.
-          • Si la force de corrélation est très élevée (≥ 7), on emploie IterativeImputer avec un RandomForestRegressor comme estimateur.
-      - Pour les variables dont la proportion de valeurs manquantes est comprise entre 10% et 65%, des stratégies similaires
-        sont utilisées avec des paramètres ajustés.
-      - Les variables ayant plus de 65% de valeurs manquantes sont supprimées du DataFrame.
+    Pour chaque colonne cible, entraîne un arbre de décision (classifieur pour les variables catégorielles, régressseur pour les variables continues)
+    sur les données connues, puis impute les valeurs manquantes dans les ensembles d'entraînement et de test.
 
     Args:
-        df (pd.DataFrame): Le DataFrame d'entrée contenant des valeurs manquantes.
-        corr_info (pd.DataFrame): Une matrice de corrélation des patterns de valeurs manquantes (exprimée en pourcentage),
-                                  telle que générée par une fonction comme `correlation_missing_values`.
-        prop_nan (pd.DataFrame): Un DataFrame indiquant le pourcentage de valeurs manquantes et le type de données pour chaque variable,
-                                 généralement obtenu via `correlation_missing_values`.
+        df_train (pd.DataFrame): Jeu de données d'entraînement contenant des valeurs manquantes.
+        df_test (pd.DataFrame ou None): Jeu de données de test contenant des valeurs manquantes. Peut être None si indisponible.
+        cols_to_impute (list of str): Liste des noms de colonnes à imputer.
+        cv (int, optionnel): Nombre de plis pour la validation croisée utilisée pour évaluer la performance des modèles. Par défaut à 5.
 
     Returns:
-        pd.DataFrame: Un nouveau DataFrame avec les valeurs manquantes imputées selon les stratégies définies.
-    """   
-    df_imputed = df.copy()
+        pd.DataFrame: Jeu de données d'entraînement mis à jour avec les imputations.
+        pd.DataFrame ou None: Jeu de données de test mis à jour avec les imputations (ou None si non fourni).
+        pd.DataFrame: DataFrame contenant les scores de performance pour chaque colonne imputée.
+    """
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
     
-    # Détection automatique des variables à imputer
-    variables_a_imputer = prop_nan[prop_nan["NaN proportion"] > 0].index.tolist()
+    scores = []
 
-    for var in variables_a_imputer:
-        taux_nan = prop_nan.loc[var, "NaN proportion"]
-        type_ = prop_nan.loc[var, "Type"]
-        corr_strength = corr_info[var].abs().mean()  # Moyenne des corrélations absolues avec les autres variables
-        
-        # Paramètres pour IterativeImputer
-        max_iter, tol = 500, 1e-3
+    for target_col in cols_to_impute:
+        target_is_categorical = df_train[target_col].dtype == 'object' or str(df_train[target_col].dtype) == 'category'
 
-        if taux_nan < 10:
-            if corr_strength < 2:
-                if type_ == 'object':
-                    imputer = SimpleImputer(strategy='most_frequent')
-                else:
-                    imputer = SimpleImputer(strategy='median')
-            
-            elif corr_strength < 5 and corr_strength >= 2:
-                imputer = KNNImputer(n_neighbors=4, weights='distance')
-            
-            elif corr_strength < 7 and corr_strength >= 5:
-                imputer = IterativeImputer(max_iter=max_iter, tol=tol, random_state=42)
-            
-            else:
-                estimator = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-            
-            df_imputed[[var]] = imputer.fit_transform(df_imputed[[var]])
-            if type_ == 'object' and taux_nan >= 10 and corr_strength >= 2:
-                    df_imputed[[var]] = df_imputed[[var]].round(0).astype(int)
-        
-        elif taux_nan >= 10 and taux_nan < 65:
-            if corr_strength < 5:
-                imputer = IterativeImputer(max_iter=max_iter, tol=tol, random_state=42)
-            
-            elif corr_strength < 7 and corr_strength >= 5:
-                estimator = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-                    
-            else:
-                estimator = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-            
-            df_imputed[[var]] = imputer.fit_transform(df_imputed[[var]])
-            if type_ == 'object' and taux_nan >= 10 and corr_strength >= 2:
-                        df_imputed[[var]] = df_imputed[[var]].round(0).astype(int)
-        
+        model = DecisionTreeClassifier(criterion='entropy', class_weight='balanced', ccp_alpha=0.01, random_state=42) if target_is_categorical else DecisionTreeRegressor(criterion='squared_error', ccp_alpha=0.01, random_state=42)
+
+        train_known = df_train[df_train[target_col].notna()].copy()
+        train_missing = df_train[df_train[target_col].isna()].copy()
+        test_missing = df_test[df_test[target_col].isna()].copy()
+
+        feature_cols = [col for col in cols_to_impute if col != target_col]
+
+        X_fit = train_known[feature_cols].copy()
+        y_fit = train_known[target_col].copy()
+
+        for col in X_fit.select_dtypes(include='object').columns:
+            le = LabelEncoder()
+            X_fit.loc[:, col] = le.fit_transform(X_fit[col].astype(str))
+
+        if not train_missing.empty:
+            X_missing_train = train_missing[feature_cols].copy()
+            for col in X_missing_train.select_dtypes(include='object').columns:
+                le = LabelEncoder()
+                X_missing_train.loc[:, col] = le.fit_transform(X_missing_train[col].astype(str))
         else:
-            df = df.drop(var, axis=1)        
+            X_missing_train = None
 
-    return df_imputed
+        if not test_missing.empty:
+            X_missing_test = test_missing[feature_cols].copy()
+            for col in X_missing_test.select_dtypes(include='object').columns:
+                le = LabelEncoder()
+                X_missing_test.loc[:, col] = le.fit_transform(X_missing_test[col].astype(str))
+        else:
+            X_missing_test = None
 
-def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
-    df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
-    
-    # Index des lignes valides (sans NaN dans les colonnes numériques)
-    valid_rows = df_numeric.dropna().index  
-    df_numeric = df_numeric.loc[valid_rows]  
+        if target_is_categorical:
+            le_target = LabelEncoder()
+            y_fit = le_target.fit_transform(y_fit.astype(str))
 
-    if df_numeric.shape[1] == 0:
-        raise ValueError("Aucune colonne numérique dans le DataFrame.")
+        model.fit(X_fit, y_fit)
 
-    # Détection des outliers avec Isolation Forest
-    iforest = IsolationForest(n_estimators=500, contamination='auto', random_state=42, n_jobs=-1)
-    df.loc[valid_rows, 'outlier_iforest'] = iforest.fit_predict(df_numeric)
-    df['outlier_iforest'] = np.where(df['outlier_iforest'] == -1, 1, 0)
+        # --- SCORING ---
+        if target_is_categorical:
+            score_array = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='accuracy')
+            score_value = round(np.mean(score_array)*100, 2)
+            metric_used = 'accuracy (%)'
+        else:
+            rmse_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_root_mean_squared_error')
+            score_value = round(np.mean(rmse_scores), 2)
+            metric_used = 'rmse'
 
-    # Détection avec Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=20, contamination='auto')
-    outliers_lof = lof.fit_predict(df_numeric)  # Génère uniquement pour les lignes valides
+        scores.append({
+            'feature': target_col,
+            'metric': metric_used,
+            'score': score_value
+        })
 
-    # Assignation correcte des valeurs LOF
-    df.loc[valid_rows, 'outlier_lof'] = np.where(outliers_lof == -1, 1, 0)
+        # --- IMPUTATION ---
+        if X_missing_train is not None:
+            preds_train = model.predict(X_missing_train)
+            if target_is_categorical:
+                preds_train = le_target.inverse_transform(preds_train)
+            df_train.loc[df_train[target_col].isna(), target_col] = preds_train
 
-    # Fusion des résultats
-    df['outlier'] = ((df['outlier_iforest'] == 1) & (df['outlier_lof'] == 1)).astype(int)
-    df = df.drop(columns=['outlier_lof', 'outlier_iforest'])
+        if X_missing_test is not None:
+            preds_test = model.predict(X_missing_test)
+            if target_is_categorical:
+                preds_test = le_target.inverse_transform(preds_test)
+            df_test.loc[df_test[target_col].isna(), target_col] = preds_test
 
-    # Suppression ou remplacement des outliers
-    seuil = max(0.05 * len(df), 1)  # Toujours au moins 1
-    if df['outlier'].sum() > seuil:
-        for col in df_numeric.columns:
-            mask_outliers = df['outlier'] == 1
-            mask_non_outliers = df['outlier'] == 0
+    scores_df = pd.DataFrame(scores)
 
-            mean = df.loc[mask_non_outliers, col].mean()
-            std = df.loc[mask_non_outliers, col].std()
-            if std == 0:
-                std = 1e-6  # Évite les valeurs identiques
+    return df_train, df_test, scores_df
 
-            df.loc[mask_outliers, col] = np.random.normal(mean, std, mask_outliers.sum())
+def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, cv=5):
+    """
+    Imputation avancée des valeurs manquantes :
+    - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
+    - Autres variables => imputation supervisée (arbre de décision)
+
+    Args:
+        df_train (pd.DataFrame): DataFrame d'entraînement
+        df_test (pd.DataFrame, optional): DataFrame de test
+        prop_nan (pd.DataFrame): Table des proportions de NaN et types des variables
+        corr_mat (pd.DataFrame): Matrice de corrélation (%) des patterns de NaN
+        cv (int): Nombre de folds pour la cross-validation de l'imputation supervisée
+
+    Returns:
+        df_train_imputed, df_test_imputed (ou None), scores_supervised, imputation_report
+    """
+    if prop_nan is None or corr_mat is None:
+        raise ValueError("Les tables prop_nan et corr_mat doivent être fournies toutes les deux.")
+
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
+
+    # --- Initialisation du rapport d'imputation ---
+    imputation_report = []
+
+    # --- Sélection des variables peu corrélées ---
+    low_corr_features = []
+    for feature in corr_mat.columns:
+        # Si la variable a des corrélations faibles (<20%) avec toutes les autres
+        if (corr_mat[feature].drop(labels=[feature]).abs() <= 20).all():
+            low_corr_features.append(feature)
+
+    # Vérification qu'elles sont bien numériques
+    low_corr_features = [
+        feature for feature in low_corr_features
+        if 'float' in prop_nan.loc[feature, 'Type'] or 'int' in prop_nan.loc[feature, 'Type']
+    ]
+
+    # Les autres
+    other_features = [f for f in prop_nan.index if f not in low_corr_features]
+
+    # --- Imputation paramétrique ---
+    if low_corr_features:
+        parametric_imputer = MultiParametricImputer(distribution='norm')
+        parametric_imputer.fit(df_train, low_corr_features)
+        df_train = parametric_imputer.transform(df_train)
+        if df_test is not None:
+            df_test = parametric_imputer.transform(df_test)
+
+        # Clipping pour éviter les envolées lyriques
+        min_max_dict = {col: (df_train[col].min(), df_train[col].max()) for col in low_corr_features}
+        for col, (min_val, max_val) in min_max_dict.items():
+            df_train[col] = df_train[col].clip(lower=min_val, upper=max_val)
+            if df_test is not None:
+                df_test[col] = df_test[col].clip(lower=min_val, upper=max_val)
+
+        # Ajout au rapport
+        for feature in low_corr_features:
+            imputation_report.append({
+                'feature': feature,
+                'method': 'Parametric Imputation (Normal distribution)',
+                'base': 'train'
+            })
+        if df_test is not None:
+            for feature in low_corr_features:
+                imputation_report.append({
+                    'feature': feature,
+                    'method': 'Parametric Imputation (Normal distribution)',
+                    'base': 'test'
+                })
+
+    # --- Imputation supervisée ---
+    if other_features:
+        df_train, df_test, scores_supervised = impute_from_supervised(
+            df_train, df_test, other_features, cv=cv
+        )
+        if df_test is not None and (df_test is df_train):
+            df_test = None
+
+        # Ajout au rapport pour les variables imputation supervisée
+        for feature in other_features:
+            imputation_report.append({
+                'feature': feature,
+                'method': 'Supervised Imputation (Decision Tree)',
+                'base': 'train'
+            })
+        if df_test is not None:
+            for feature in other_features:
+                imputation_report.append({
+                    'feature': feature,
+                    'method': 'Supervised Imputation (Decision Tree)',
+                    'base': 'test'
+                })
+
     else:
-        df = df[df['outlier'] == 0].drop(columns='outlier')
-    
-    return df
+        scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
 
-def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
+    # Conversion du rapport en DataFrame
+    imputation_report = pd.DataFrame(imputation_report)
+
+    return df_train, df_test, scores_supervised, imputation_report
+
+def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, target: str = None, contamination: float = 0.01):
     """
-    Detects outliers in a dataset using Isolation Forest and Local Outlier Factor (LOF) methods.
-    The outliers are identified based on the combination of results from both methods, and can be either replaced using winsorization or removed based on a predefined threshold.
-
+    Détecte les outliers sur df_train avec Isolation Forest + LOF, winsorize les variables numériques.
+    Si df_test est fourni, applique la même winsorization dessus.
+    
     Args:
-        df (pd.DataFrame): The input DataFrame containing the data, including both numerical features and the target variable.
-        target (str): The name of the target variable column in the DataFrame, which will be excluded from outlier detection.
-
-    Raises:
-        ValueError: If the DataFrame does not contain any numeric columns after removing the target variable or has missing data.
+        df_train (pd.DataFrame): Base d'entraînement.
+        target (str): Nom de la cible à exclure.
+        df_test (pd.DataFrame, optional): Base de test. Si None, seul df_train est traité.
+        contamination (float): Contamination supposée pour IsolationForest et LOF.
 
     Returns:
-        pd.DataFrame: The input DataFrame with outliers flagged and handled (either winsorized or removed). A new column 'outlier' will indicate the final outliers after combining the results of both methods.
+        (df_train_winsorized, df_test_winsorized (si fourni sinon None), nombre_total_modifications (int))
     """
-    
-    # Sélectionner uniquement les colonnes numériques
-    df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
-    
-    # Index des lignes valides (sans NaN dans les colonnes numériques)
-    valid_rows = df_numeric.dropna().index  
-    df_numeric = df_numeric.loc[valid_rows]  
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
 
-    if df_numeric.shape[1] == 0:
-        raise ValueError("Aucune colonne numérique dans le DataFrame.")
+    features = df_train.drop(columns=[target], errors='ignore').select_dtypes(include=[np.number])
+    valid_idx = features.dropna().index
+    features = features.loc[valid_idx]
 
-    # Détection des outliers avec Isolation Forest
-    iforest = IsolationForest(n_estimators=500, contamination='auto', random_state=42, n_jobs=-1)
-    df.loc[valid_rows, 'outlier_iforest'] = iforest.fit_predict(df_numeric)
-    df['outlier_iforest'] = np.where(df['outlier_iforest'] == -1, 1, 0)
-    
-    # Détection avec Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=20, contamination='auto')
-    outliers_lof = lof.fit_predict(df_numeric)  # Génère uniquement pour les lignes valides
-    df.loc[valid_rows, 'outlier_lof'] = np.where(outliers_lof == -1, 1, 0)
+    if features.shape[1] == 0:
+        raise ValueError("Aucune variable numérique exploitable dans df_train.")
 
-    # Fusion des résultats
-    df['outlier'] = ((df['outlier_iforest'] == 1) & (df['outlier_lof'] == 1)).astype(int)
-    df = df.drop(columns=['outlier_lof', 'outlier_iforest'])
+    # Détection sur train
+    iso = IsolationForest(n_estimators=500, contamination=contamination, random_state=42, n_jobs=-1)
+    out_iso = iso.fit_predict(features)
+    lof = LocalOutlierFactor(n_neighbors=20, contamination=contamination)
+    out_lof = lof.fit_predict(features)
 
-    # Calcul de la proportion d'outliers détectés par les deux algos
-    proportion_outliers = df['outlier'].sum() / len(df)
+    outliers = ((out_iso == -1) & (out_lof == -1)).astype(int)
 
-    # Suppression ou remplacement des outliers (winsorisation)
-    seuil = max(0.01 * len(df), 1)
-    if df['outlier'].sum() > seuil:
-        for col in df_numeric.columns:
-            # Appliquer la winsorisation aux outliers avec la proportion calculée
-            df[col] = winsorize(df[col], limits=[proportion_outliers, proportion_outliers])  # Limites ajustées selon proportion_outliers
+    # Définir bornes winsorization sur train
+    bounds = {}
+    for col in features.columns:
+        mask = (outliers == 1)
+        if mask.any():
+            lower = np.percentile(df_train.loc[~mask, col], 1)
+            upper = np.percentile(df_train.loc[~mask, col], 99)
+        else:
+            lower = np.percentile(df_train[col], 1)
+            upper = np.percentile(df_train[col], 99)
+        bounds[col] = (lower, upper)
+
+    # Winsorize train
+    n_modif_train = 0
+    for col, (lower, upper) in bounds.items():
+        original = df_train[col].copy()
+        df_train[col] = np.clip(df_train[col], lower, upper)
+        n_modif_train += (original != df_train[col]).sum()
+
+    # Winsorize test si dispo
+    n_modif_test = 0
+    if df_test is not None:
+        for col, (lower, upper) in bounds.items():
+            if col in df_test.columns:
+                original = df_test[col].copy()
+                df_test[col] = np.clip(df_test[col], lower, upper)
+                n_modif_test += (original != df_test[col]).sum()
+
+    nb_outliers = int(n_modif_train + n_modif_test)
+
+    if df_test is not None:
+        return df_train, df_test, nb_outliers
     else:
-        df = df[df['outlier'] == 0]
-    
-    df = df.drop(columns='outlier')
-        
-    return df
+        return df_train, nb_outliers
 
-def transform_data(split_data: bool, df: pd.DataFrame = None, df_train: pd.DataFrame = None, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
+def transform_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
     """
-    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées,
-    avec gestion optionnelle des ensembles d'entraînement et de test pour éviter toute fuite de données.
-
+    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées.
+    
     Args:
-        split_data (bool): 
-            Indique si les données sont séparées en df_train et df_test. Si False, 'df' est utilisé pour transformation globale.
-        df (pd.DataFrame, optional): 
-            DataFrame complet à transformer si split_data=False. Ignoré sinon.
-        df_train (pd.DataFrame, optional): 
-            DataFrame d'entraînement à transformer si split_data=True.
-        df_test (pd.DataFrame, optional): 
-            DataFrame de test à transformer si split_data=True.
-        list_boxcox (list[str], optional): 
-            Liste des colonnes sur lesquelles appliquer la transformation de Box-Cox (valeurs strictement positives).
-        list_yeo (list[str], optional): 
-            Liste des colonnes sur lesquelles appliquer la transformation de Yeo-Johnson (valeurs quelconques).
-        list_log (list[str], optional): 
-            Liste des colonnes à transformer via logarithme naturel (valeurs strictement positives).
-        list_sqrt (list[str], optional): 
-            Liste des colonnes à transformer via racine carrée (valeurs ≥ 0).
+        df_train (pd.DataFrame): DataFrame d'entraînement.
+        df_test (pd.DataFrame, optional): DataFrame de test, transformé avec les mêmes paramètres que df_train.
+        list_boxcox (list[str], optional): Colonnes pour transformation Box-Cox (valeurs > 0).
+        list_yeo (list[str], optional): Colonnes pour transformation Yeo-Johnson (valeurs quelconques).
+        list_log (list[str], optional): Colonnes pour transformation Log (valeurs > 0).
+        list_sqrt (list[str], optional): Colonnes pour transformation Racine carrée (valeurs ≥ 0).
 
     Returns:
-        pd.DataFrame or tuple(pd.DataFrame, pd.DataFrame): 
-            - Si split_data=False : retourne le DataFrame transformé (df).
-            - Si split_data=True : retourne un tuple (df_train, df_test) transformés.
+        tuple: (df_train transformé, df_test transformé si fourni sinon seulement df_train transformé)
     """
-    # Box-Cox Transformation
-    if list_boxcox and len(list_boxcox) > 0:
-        transformer_bc = PowerTransformer(method='box-cox')
-        
-        if split_data:
-            transformer_bc.fit(df_train[list_boxcox])
-            df_train[list_boxcox] = transformer_bc.transform(df_train[list_boxcox])
-            df_test[list_boxcox] = transformer_bc.transform(df_test[list_boxcox])
-        else:
-            df[list_boxcox] = transformer_bc.fit_transform(df[list_boxcox])
 
-    # Yeo-Johnson Transformation
-    if list_yeo and len(list_yeo) > 0:
-        transformer_yeo = PowerTransformer(method='yeo-johnson')
-        
-        if split_data:
-            transformer_yeo.fit(df_train[list_yeo])
-            df_train[list_yeo] = transformer_yeo.transform(df_train[list_yeo])
-            df_test[list_yeo] = transformer_yeo.transform(df_test[list_yeo])
-        else:
-            df[list_yeo] = transformer_yeo.fit_transform(df[list_yeo])
-    
-    # Logarithmic Transformation
-    if list_log and len(list_log) > 0:
-        if split_data:
-            for col in list_log:
-                df_train[col] = np.log(df_train[col])
-                df_test[col] = np.log(df_test[col])
-        else:        
-            for col in list_log:
-                df[col] = np.log(df[col])
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
 
-    # Square Root Transformation
-    if list_sqrt and len(list_sqrt) > 0:
-        if split_data:
-            for col in list_sqrt:
-                df_train[col] = np.sqrt(df_train[col])
-                df_test[col] = np.sqrt(df_test[col])
-        else:
-            for col in list_sqrt:
-                df[col] = np.sqrt(df[col])
-    
-    if split_data:
-        return df_train, df_test
-    else:
-        return df
+    def apply_transform(transformer, cols):
+        transformer.fit(df_train[cols])
+        df_train[cols] = transformer.transform(df_train[cols])
+        if df_test is not None:
+            df_test[cols] = transformer.transform(df_test[cols])
 
-def calculate_inertia(X):
-    """
-    Calcule l'inertie (variance expliquée) de la dernière composante principale ajoutée à chaque étape
-    de l'ACP, en augmentant progressivement le nombre de composantes.
+    def simple_transform(func, cols, condition=lambda x: x < 0, error_msg="Valeurs invalides"):
+        for col in cols:
+            if condition(df_train[col]).any():
+                raise ValueError(f"{error_msg} pour '{col}'")
+            df_train[col] = func(df_train[col])
+            if df_test is not None:
+                df_test[col] = func(df_test[col])
 
-    Args:
-        X (np.ndarray or pd.DataFrame): 
-            Matrice des données (features uniquement), à transformer via ACP.
+    # Box-Cox (strictement positif)
+    if list_boxcox:
+        simple_transform(lambda x: x <= 0, list_boxcox, "Box-Cox nécessite des valeurs > 0")
+        apply_transform(PowerTransformer(method='box-cox'), list_boxcox)
 
-    Returns:
-        list[float]: 
-            Liste des pourcentages de variance expliquée par la dernière composante ajoutée à chaque itération 
-            (de 1 à n_features).
-    """
-    inertias = []
-    for i in range(1, X.shape[1] + 1):
-        pca = PCA(n_components=i)
-        pca.fit(X)
-        inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
-    return inertias
+    # Yeo-Johnson (n'importe quelle valeur)
+    if list_yeo:
+        apply_transform(PowerTransformer(method='yeo-johnson'), list_yeo)
+
+    # Log (strictement positif)
+    if list_log:
+        simple_transform(np.log, list_log, lambda x: x <= 0, "Log nécessite des valeurs > 0")
+
+    # Sqrt (positif ou nul)
+    if list_sqrt:
+        simple_transform(np.sqrt, list_sqrt, lambda x: x < 0, "Racine carrée nécessite des valeurs ≥ 0")
+
+    return df_train, df_test if df_test is not None else df_train
 
 def objective(trial, task="regression", model_type="Random Forest", multi_class=False, X=None, y=None, cv=5, scoring_comp='neg_root_mean_squared_error'):
     # Paramètres d'optimisation selon le type de modèle
@@ -589,108 +764,79 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def evaluate_and_decompose(models, X, y, task, scoring_dict, cv=5, n_jobs=-1, random_seed=None):
-    """
-    Combine validation croisée et calcul du biais/variance en une seule fonction optimisée.
+def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
+    """Calcule le biais et la variance d'un estimateur via une décomposition par validation croisée.
+
+    Cette fonction effectue une décomposition du biais et de la variance d'un modèle d'estimation en utilisant 
+    la validation croisée (KFold). Elle permet d'évaluer la performance de l'estimateur en termes de biais et 
+    de variance en fonction de la tâche (régression ou classification).
 
     Args:
-        models (dict): Dictionnaire {index: modèle sklearn instancié}
-        X (array-like): Features
-        y (array-like): Target
-        task (str): "Regression" ou "Classification"
-        scoring_dict (dict): Dictionnaire des métriques (nom lisible -> nom sklearn)
-        cv (int): Nombre de folds pour la validation croisée
-        n_jobs (int): Nombre de jobs pour joblib
-        random_seed (int): Seed aléatoire
+        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer.
+        X (array-like, shape (n_samples, n_features)): Matrices de caractéristiques, où chaque ligne est une 
+                                                      observation et chaque colonne est une caractéristique.
+        y (array-like, shape (n_samples,)): Vecteur ou matrice des valeurs cibles (vérités terrain), qui 
+                                            varient en fonction de la tâche (régression ou classification).
+        task (str): Type de tâche, soit "Classification", soit "Regression". Cela détermine le calcul du biais 
+                    et de la variance.
+        cv (int, optional): Nombre de divisions (splits) pour la validation croisée. Par défaut à 5.
+        random_seed (int, optional): Seed pour le générateur aléatoire, utile pour reproduire les résultats. 
+                                     Par défaut à None.
 
     Returns:
-        df_scores (pd.DataFrame): Résultats des scores moyens et std
-        df_bias_var (pd.DataFrame): Résultats biais/variance
+        tuple: Un tuple contenant les valeurs suivantes :
+            - avg_expected_loss (float): Perte moyenne (erreur quadratique moyenne pour la régression, erreur 
+                                          de classification pour la classification).
+            - avg_bias (float): Biais moyen (écart moyen entre les prédictions et les valeurs réelles).
+            - avg_var (float): Variance moyenne des prédictions.
+            - bias_relative (float): Biais relatif, normalisé par rapport à l'écart-type de la cible (régression) 
+                                     ou au nombre de classes (classification).
+            - var_relative (float): Variance relative des prédictions par rapport à la variance de la cible 
+                                     (régression) ou au nombre de classes (classification).
     """
+    # Initialisation
     rng = np.random.RandomState(random_seed)
     kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
-    folds = list(kf.split(X))
 
-    def process_model(idx, model):
-        preds_all = []
-        truths_all = []
-        fold_scores = []
+    all_pred = []
+    y_tests = []
 
-        for train_idx, test_idx in folds:
-            X_train, X_test = X[train_idx], X[test_idx]
-            y_train, y_test = y[train_idx], y[test_idx]
+    # Boucle sur les folds de validation croisée
+    for train_idx, test_idx in kf.split(X):
+        X_train_fold, X_test_fold = X[train_idx], X[test_idx]
+        y_train_fold, y_test_fold = y[train_idx], y[test_idx]
+        model = estimator.fit(X_train_fold, y_train_fold)
+        preds = model.predict(X_test_fold)
+        
+        all_pred.append(preds)
+        y_tests.append(y_test_fold)
 
-            mdl = model.fit(X_train, y_train)
-            y_pred = mdl.predict(X_test)
+    all_pred = np.concatenate(all_pred)
+    y_tests = np.concatenate(y_tests)
 
-            preds_all.append(y_pred)
-            truths_all.append(y_test)
+    if task == "Classification":
+        # Classification : calcul de la majorité des prédictions (mode)
+        main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
+        avg_expected_loss = np.mean(all_pred != y_tests)
+        avg_bias = np.mean(main_predictions != y_tests)
+        avg_var = np.mean((all_pred != main_predictions).astype(int))
 
-            scores = {}
-            for name, scorer_name in scoring_dict.items():
-                scorer = get_scorer(scorer_name)
-                val = scorer(mdl, X_test, y_test)
-                scores[name] = val
-            fold_scores.append(scores)
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions != y_tests) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        var_relative = np.mean((all_pred != main_predictions).astype(int)) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        
+    else:
+        # Régression : calcul de la moyenne des prédictions
+        main_predictions = np.mean(all_pred, axis=0)
+        avg_expected_loss = np.mean((all_pred - y_tests) ** 2)
+        avg_bias = np.mean(main_predictions - y_tests)
+        avg_var = np.mean((all_pred - main_predictions) ** 2)
 
-        # Préparation des scores moyens et std
-        scores_df = pd.DataFrame(fold_scores)
-        mean_scores = scores_df.mean()
-        std_scores = scores_df.std()
+        # Calcul du biais et de la variance relatifs
+        bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
+        var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
 
-        preds_all = np.concatenate(preds_all)
-        truths_all = np.concatenate(truths_all)
-
-        # Calcul biais/variance
-        if task == "Classification":
-            preds_all_reshaped = np.array(preds_all).reshape(cv, -1).astype(int)
-            main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=preds_all_reshaped)
-            avg_expected_loss = np.mean(preds_all != truths_all)
-            avg_bias = np.mean(main_predictions != truths_all)
-            avg_var = np.mean((preds_all_reshaped != main_predictions).astype(int))
-            n_classes = len(np.unique(truths_all))
-            bias_relative = avg_bias / n_classes
-            var_relative = avg_var / n_classes
-        else:
-            preds_all_reshaped = np.array(preds_all).reshape(cv, -1)
-            main_predictions = np.mean(preds_all_reshaped, axis=0)
-            avg_expected_loss = np.mean((preds_all - truths_all) ** 2)
-            avg_bias = np.mean(main_predictions - truths_all)
-            avg_var = np.mean((preds_all - main_predictions) ** 2)
-            bias_relative = avg_bias / np.std(truths_all)
-            var_relative = avg_var / np.var(truths_all)
-
-        # Conclusion biais/variance
-        if abs(bias_relative) > 0.2 and var_relative > 0.2:
-            conclusion = "Problème majeur : le modèle est vraisemblablement pas adapté"
-        elif abs(bias_relative) > 0.2:
-            conclusion = "Biais élevé : suspicion de sous-ajustement"
-        elif var_relative > 0.2:
-            conclusion = "Variance élevée : suspicion de sur-ajustement"
-        else:
-            conclusion = "Bien équilibré"
-
-        return {
-            'Model Index': idx,
-            **{f"Mean - {k}": round(v * 100, 2) if task == "Classification" else round(-v, 3) for k, v in mean_scores.items()},
-            **{f"Std - {k}": round(std_scores[k], 5) for k in scoring_dict.keys()},
-            'Bias': round(avg_bias, 3),
-            'Variance': round(avg_var, 3),
-            'Bias Relative': round(bias_relative, 3),
-            'Variance Relative': round(var_relative, 3),
-            'Conclusion': conclusion
-        }
-
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(process_model)(idx, model) for idx, model in models.items()
-    )
-
-    df = pd.DataFrame(results).set_index("Model Index")
-    score_cols = [col for col in df.columns if col.startswith("Mean") or col.startswith("Std")]
-    bias_var_cols = ['Bias', 'Variance', 'Bias Relative', 'Variance Relative', 'Conclusion']
-
-    return df[score_cols], df[bias_var_cols]
-
+    return avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
@@ -767,32 +913,36 @@ st.write(
     """
 )
 
-# Chargement des données
-df = None
-uploaded_file = st.file_uploader("Choississez un fichier (csv, xlsx et  txt acceptés seulement)", type=["csv", "xlsx", "txt"])
+# Initialisation des variables
+df_train = None
+df_test = None
+uploaded_file_train = st.file_uploader("Choisissez un fichier d'entraînement (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="train")
+uploaded_file_test = st.file_uploader("Choisissez un fichier de validation (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="test")
 wrang = st.checkbox("La base de données nécessite un traitement")
+valid_train = False
+valid_test = False
 valid_mod=False
 valid_wrang=False
 
-if uploaded_file is not None:
-    byte_data = uploaded_file.read()
-    separators = [";", ",", "\t"]
-    df = None
-    detected_sep = None
-
-    for sep in separators:
-        try:
-            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
-            if tmp_df.shape[1] > 1:
-                detected_sep = sep
-                break
-        except Exception:
-            continue
-
-    if detected_sep is not None:
-        df = pd.read_csv(BytesIO(byte_data), sep=detected_sep)  # Chargement complet proprement
+# Chargement du fichier d'entraînement
+if uploaded_file_train is not None:
+    df_train = load_file(uploaded_file_train)
+    if df_train is not None:
+        valid_train = True
     else:
-        st.warning("Échec de la détection du séparateur. Vérifiez le format du fichier.")
+        st.warning("Échec de la détection du séparateur pour le fichier d'entraînement. Vérifiez le format du fichier.")
+
+# Chargement du fichier de test
+if uploaded_file_test is not None:
+    df_test = load_file(uploaded_file_test)
+    if df_test is not None:
+        valid_test = True
+    else:
+        st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
+else:
+    df = df_train
+    del df_train
+    del df_test
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
@@ -803,8 +953,8 @@ if df is not None:
         
         st.sidebar.subheader("Informations générales")
         
-        # Demander la variable cible pour la modélisation
-        target = st.sidebar.selectbox("Choisissez la variable cible de votre modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
+        # Demander la variable cible
+        target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
         
         # Demander s'il faut demander de diviser la base
         split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
@@ -814,18 +964,29 @@ if df is not None:
         
         if split_data:
             test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
-            test_size=test_size/100
+            test_size = test_size/100
             
             df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
         
         pb = False
         wrang_finished = False
         
+        st.sidebar.subheader("Contrôle des individus")
+        
+        # Outliers
+        wrang_outliers = st.sidebar.checkbox("Voulez-vous traiter les valeurs aberrantes/outliers ?", value=False)
+        
+        if wrang_outliers:
+            contamination = st.sidebar.slider("Proportion des individus que vous suspectez d'être des outliers en (%)", min_value=0, max_value=100, value=0, help="Si vous n'en avez aucune idée, laissez à 0")
+            if contamination == 0:
+                contamination = 'auto'
+            else:
+                contamination = contamination/100
+        
         st.sidebar.subheader("Mise à l'échelle des variables numériques")
         
         # Déterminer si la variable cible doit être incluse dans la mise à l'échelle
-        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Cochez cette case si vous ne souhaotez pas inclure une variable dans le traitement.")
-        
+        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Si vous n'avez pas de variable cible, ne cochez pas cette case, sinon cochez-là")
         
         if not use_target:
             df_copy=df.copy().drop(columns=target)
@@ -927,7 +1088,7 @@ if df is not None:
             pca_option = st.sidebar.radio("Choisissez la méthode de sélection", ("Nombre de composantes", "Variance expliquée"))
 
             if pca_option == "Nombre de composantes":
-                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=15, value=3)
+                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=df.shape[1]-1, value=1)
             elif pca_option == "Variance expliquée":
                 explained_variance = st.sidebar.slider("Variance expliquée à conserver (%)", min_value=00, max_value=100, value=95)
         
@@ -1029,7 +1190,7 @@ if df is not None:
         time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
         
         # Pondération de complexité selon les modèles
-        complexity_weights = { "Linear Regression": 1, "Logistic Regression": 2,
+        complexity_weights = {"Linear Regression": 1, "Logistic Regression": 2,
                               "KNN": 4, "Random Forest": 8,
                               "LightGBM": 7, "XGBoost": 7}
         
@@ -1070,180 +1231,372 @@ if valid_wrang:
         
         # Suppression des doublons
         if drop_dupli:
-            df_train.drop_duplicates()
+            len_before_dupli =len(df_train)
+            df_train = df_train.drop_duplicates()
+            len_after_dupli =len(df_train)
+            len_diff = len_before_dupli - len_after_dupli            
         
-        # Etude des valeurs manquantes    
-        if not use_target:
-            df_train = df_train.dropna(subset=[target])
-        corr_mat, prop_nan = correlation_missing_values(df_train)
+        # Etude des valeurs manquantes
+        len_before_nan_target = len(df_train)
+        df_train = df_train.dropna(subset=[target])
+        len_after_nan_target = len(df_train)
+        len_diff_nan_target = len_before_nan_target - len_after_nan_target
+            
+        corr_mat_train, corr_mat_test, corr_mat, prop_nan_train, prop_nan_test, prop_nan = correlation_missing_values(df_train, df_test)
         
         # Détecter les outliers
-        df_outliers = detect_outliers_iforest_lof(df_train, target)    
+        if wrang_outliers:
+            df_train_outliers, df_test_outliers, nb_outliers = detect_and_winsorize(df_train, df_test, target = target, contamination = contamination)
+        else:
+            df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
+            
+        # Imputer les valeurs manquantes
+        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=cv)
         
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
-            df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+            df_train_encoded, df_test_encoded = encode_data(df_train_imputed, df_test_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
         else:
-            df_encoded = df_outliers.copy()
-            
-        # Imputer les valeurs manquantes
-        df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan) 
+            df_train_encoded, df_test_encoded = df_train_imputed.copy(), df_test_imputed.copy()
     
-        # Mettre à l'échelle les données
+        # Sélection des vraies variables numériques depuis df_train_imputed
+        num_cols = df_train_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_train_imputed.select_dtypes(include=['number']).columns
+
+        # Mise à l'échelle
         if scale_all_data:
             if scale_method:
-                if not use_target:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                            columns=df_imputed.drop(columns=target).columns,
-                                            index=df_imputed.index)
-                    df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
-                else:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
+                scaler.fit(df_train_encoded[num_cols])
 
+                df_train_scaled = df_train_encoded.copy()
+                df_train_scaled[num_cols] = scaler.transform(df_train_encoded[num_cols])
+
+                df_test_scaled = df_test_encoded.copy()
+                df_test_scaled[num_cols] = scaler.transform(df_test_encoded[num_cols])
             else:
                 st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
                 
         # Appliquer les transformations individuelles
         if not scale_all_data:
-            df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+            df_train_scaled, df_test_scaled = transform_data(df_train_scaled, df_test_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+
+        # Application de l'ACP en fonction du choix de l'utilisateur
+        if use_pca:
+            # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
+            if pca_option == "Nombre de composantes":
+                n_components = min(n_components, df_train_scaled.shape[1])
+                pca = PCA(n_components=n_components)
+            elif pca_option == "Variance expliquée":
+                if explained_variance == 100:
+                    pca = PCA(n_components=None)
+                else:
+                    pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+            else:
+                pca = PCA()  # Par défaut, on prend tous les composants
+
+            # Appliquer l'ACP sur les variables explicatives d'entrainement
+            if not use_target:
+                df_explicatives_train = df_train_scaled.drop(columns=[target])
+            else:
+                df_explicatives_train = df_train_scaled.copy()
+
+            # Apprentissage de l'ACP sur l'ensemble d'entraînement
+            pca.fit(df_explicatives_train)
+
+            # Transformation des données d'entraînement
+            df_pca_train = pca.transform(df_explicatives_train)
+            
+            # Créer le DataFrame avec les composantes principales pour l'entraînement
+            df_pca_train = pd.DataFrame(df_pca_train, columns=[f'PC{i+1}' for i in range(df_pca_train.shape[1])], index=df_explicatives_train.index)
+
+            # Ajouter le target si nécessaire pour l'entraînement
+            if not use_target:
+                df_target_train = df_train_scaled[target]
+                df_train_scaled = pd.concat([df_pca_train, df_target_train], axis=1)
+            else:
+                df_train_scaled = df_pca_train.copy()
+
+            # Transformation des données de test avec le même modèle PCA
+            if not use_target:
+                df_explicatives_test = df_test_scaled.drop(columns=[target])
+            else:
+                df_explicatives_test = df_test_scaled.copy()
+
+            # Transformation des données de test en utilisant l'ACP ajustée sur les données d'entraînement
+            df_pca_test = pca.transform(df_explicatives_test)
+            
+            # Créer le DataFrame avec les composantes principales pour le test
+            df_pca_test = pd.DataFrame(df_pca_test, columns=[f'PC{i+1}' for i in range(df_pca_test.shape[1])], index=df_explicatives_test.index)
+
+            # Ajouter le target si nécessaire pour les données de test
+            if not use_target:
+                df_target_test = df_test_scaled[target]
+                df_test_scaled = pd.concat([df_pca_test, df_target_test], axis=1)
+            else:
+                df_test_scaled = df_pca_test.copy()
+
+            # Calcul des inerties (variances expliquées par composante) sur l'ensemble d'entraînement
+            pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
+            pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+
+            # Création du DataFrame pour la variance expliquée et cumulative
+            pca_infos = pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+            pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
+            pca_infos['Nombre de composantes'] += 1
+
+            # Visualisation avec Plotly (ou Seaborn si tu préfères)
+            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                        markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+            fig.update_layout(
+                xaxis_title='Nombre de composantes principales',
+                yaxis_title='Variance (%)',
+                legend_title='Type de variance',
+                width=900, height=600)
+            
+        # Finir le traitement
+        wrang_finished = True
+
+        # Afficher le descriptif de la base de données
+        st.write("### Descriptif de la base de données :")
+        st.write("**Nombre d'observations (train) :**", df_train.shape[0])
+        st.write("**Nombre de variables (train) :**", df_train.shape[1])
+        st.write("**Nombre d'observations (test) :**", df_test.shape[0])
+        st.write("**Nombre de variables (test) :**", df_test.shape[1])
+
+        # Description des données
+        if df_train is not None:
+            description_train = []
+            for col in df_train.columns:
+                if pd.api.types.is_numeric_dtype(df_train[col]):
+                    var_type = 'Numérique'
+                    n_modalites = np.nan
+                else:
+                    var_type = 'Catégorielle'
+                    n_modalites = df_train[col].nunique()
+
+                description_train.append({
+                    'Variable': col,
+                    'Type': var_type,
+                    'Nb modalités': n_modalites
+                })
+            st.dataframe(pd.DataFrame(description_train), use_container_width=True, hide_index=True)
+
+        # Diagnostic des données
+        st.write("### Diagnostique des bases de données :")
+        st.write("**Matrice de corrélation entre les valeurs manquantes (train):**")
+        st.dataframe(corr_mat_train, use_container_width=True)
+        st.write("**Matrice de corrélation entre les valeurs manquantes (test):**")
+        st.dataframe(corr_mat_test, use_container_width=True)
+        st.write("**Proportion de valeurs manquantes par variable (train):**")
+        st.dataframe(prop_nan_train, use_container_width=True)
+        st.write("**Proportion de valeurs manquantes par variable (test):**")
+        st.dataframe(prop_nan_test, use_container_width=True)
+        st.write("**Nombre d'outliers traités:**", nb_outliers)
+
+        # Rapport du preprocessing
+        st.write("### Rapport du preprocessing :")
+        st.write("**Nombre de doublons traités:**", len_diff)
+        st.write("**Nombre d'observations supprimées car la variable cible est manquante:**", len_diff_nan_target)
+        st.write("**Résumé des méthodes d'imputation utilisées:**")
+        st.dataframe(imputation_report, use_container_width=True)
+        st.write("**Score de l'imputation supervisée :**")
+        st.dataframe(scores_supervised, use_container_width=True)        
+        
+        # Affichage du graphique PCA si nécessaire
+        if use_pca:
+            st.plotly_chart(fig)
+
+        # Préparation pour le téléchargement
+        if df_train is not None and df_test is not None and wrang_finished and not pb:
+            # Créer un dossier temporaire pour stocker les fichiers CSV
+            with io.BytesIO() as buffer:
+                with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    # Sauvegarder train et test dans des fichiers CSV dans le zip
+                    with io.StringIO() as csv_buffer_train, io.StringIO() as csv_buffer_test:
+                        df_train.to_csv(csv_buffer_train, index=False)
+                        df_test.to_csv(csv_buffer_test, index=False)
+                        
+                        zip_file.writestr("train.csv", csv_buffer_train.getvalue())
+                        zip_file.writestr("test.csv", csv_buffer_test.getvalue())
+                
+                # Préparer le téléchargement du dossier zip contenant les deux fichiers
+                st.write("### Aperçu des données traitées :")
+                st.dataframe(df_train)
+
+                # Télécharger le fichier zip contenant les deux bases
+                st.download_button(
+                    label="📥 Télécharger les données traitées",
+                    data=buffer.getvalue(),
+                    file_name="data_processed.zip",
+                    mime="application/zip"
+                )            
     
     else:
         # Suppression des doublons
         if drop_dupli:
-            df.drop_duplicates()
-        
-        # Etude des valeurs manquantes     
-        if not use_target:
-            df = df.dropna(subset=[target])
-        corr_mat, prop_nan = correlation_missing_values(df)
+            len_before_dupli = len(df)
+            df = df.drop_duplicates()
+            len_after_dupli = len(df)
+            len_diff = len_before_dupli - len_after_dupli
+        else:
+            len_diff = 0
+            
+        # Etude des valeurs manquantes
+        len_before_nan_target = len(df)
+        df = df.dropna(subset=[target])
+        len_after_nan_target = len(df)
+        len_diff_nan_target = len_before_nan_target - len_after_nan_target
+                    
+        corr_mat, _, _, prop_nan, _, _ = correlation_missing_values(df)
     
         # Détecter les outliers
-        df_outliers = detect_outliers_iforest_lof(df, target)    
+        if wrang_outliers:
+            df_outliers, nb_outliers = detect_and_winsorize(df, target = target, contamination = contamination)
+        else:
+            df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
+            
+        # Imputer les valeurs manquantes
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(nb_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=cv)
     
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
-            df_encoded = encode_data(df_outliers, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+            df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
         else:
             df_encoded = df_outliers.copy()
-            
-        # Imputer les valeurs manquantes
-        df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
         
         # Mettre à l'échelle les données
         if scale_all_data:
             if scale_method:
-                if not use_target:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                            columns=df_imputed.drop(columns=target).columns,
-                                            index=df_imputed.index)
-                    df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
-                else:
-                    df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
-
+                num_cols = df_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_imputed.select_dtypes(include=['number']).columns
+                
+                df_scaled = df_encoded.copy()
+                scaler.fit(df_encoded[num_cols])
+                df_scaled[num_cols] = scaler.transform(df_encoded[num_cols])
             else:
                 st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
     
         # Appliquer les transformations individuelles
         if not scale_all_data:
             df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
-            
-
     
-    # Application de l'ACP en fonction du choix de l'utilisateur
-    if use_pca:
-        pca = PCA()
-        if not use_target:
-            df_explicatives = df_scaled.drop(columns=[target])
-            df_target = df_scaled[target]
-        else:
-            df_explicatives = df_scaled.copy()
-            df_target = None
-        
-        # Si l'utilisateur choisit le nombre de composantes
-        if pca_option == "Nombre de composantes":
-            # Ajuster n_components en fonction du nombre de features disponibles
-            n_components = min(n_components, df_explicatives.shape[1])
-            pca = PCA(n_components=n_components)
-            df_pca = pca.fit_transform(df_explicatives)
-        
-        # Si l'utilisateur choisit la variance expliquée
-        elif pca_option == "Variance expliquée":
-            if explained_variance == 100:
-                # Utilisation de la méthode PCA avec "None" pour récupérer toutes les composantes qui expliquent 100% de la variance
-                pca = PCA(n_components=None)  
-            else:
-                pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
-            df_pca = pca.fit_transform(df_explicatives)
-        
-        df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
-        if df_target is not None:
-            df_scaled = pd.concat([df_pca, df_target], axis=1)
-        else:
-            df_scaled = df_pca.copy()
-            
-    if use_pca:   
-        pca_inertias = calculate_inertia(df_explicatives)
-        pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
-        pca_infos=pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
-        pca_infos=pca_infos.reset_index().rename(columns={'index':'Nombre de composantes'})
-        pca_infos['Nombre de composantes'] += 1
-        
-        # Visualisation avec Seaborn
-        fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'], 
-                markers=True, title="Evolution de la variance expliquée par les composantes principales",
-                labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
-                color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
-        fig.update_layout(
-            xaxis_title='Nombre de composantes principales',
-            yaxis_title='Variance (%)',
-            legend_title='Type de variance',
-            width=900, height=600
-        )
-    
-    # Finir le traitement
-    wrang_finished = True
-    # Afficher le descriptif de la base de données
-    st.write("### Descriptif de la base de données :")
-    st.write("**Nombre d'observations :**", df_scaled.shape[0])
-    st.write("**Nombre de variables :**", df_scaled.shape[1])
-    if df is not None:
-        description = []
-        for col in df_scaled.columns:
-            if pd.api.types.is_numeric_dtype(df_scaled[col]):
-                var_type = 'Numérique'
-                n_modalites = np.nan
-            else:
-                var_type = 'Catégorielle'
-                n_modalites = df_scaled[col].nunique()
-            
-            description.append({
-                'Variable': col,
-                'Type': var_type,
-                'Nb modalités': n_modalites
-            })
-        st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
-    
+        # Application de l'ACP en fonction du choix de l'utilisateur
         if use_pca:
-            st.plotly_chart(fig)
-    
-    # Téléchargement du fichier encodé
-    if df is not None and wrang_finished and not pb:
-        df = df_scaled.copy()
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-        csv_data = csv_buffer.getvalue()
-        
-        # Afficher l'aperçu des données traitées
-        st.write("### Aperçu des données traitées :")
-        st.dataframe(df_scaled)
+            # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
+            if pca_option == "Nombre de composantes":
+                n_components = min(n_components, df_scaled.shape[1])
+                pca = PCA(n_components=n_components)
+            elif pca_option == "Variance expliquée":
+                if explained_variance == 100:
+                    pca = PCA(n_components=None)
+                else:
+                    pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+            else:
+                pca = PCA()  # Par défaut, on prend tous les composants
 
-        # Afficher le bouton pour télécharger le fichier
-        st.download_button(
-            label="📥 Télécharger les données traitées",
-            data=csv_data,
-            file_name="data.csv",
-            mime="text/csv"
-        )
+            # Appliquer l'ACP sur les variables explicatives
+            if not use_target:
+                df_explicatives = df_scaled.drop(columns=[target])
+            else:
+                df_explicatives = df_scaled.copy()
+
+            # Apprentissage de l'ACP
+            pca.fit(df_explicatives)
+
+            # Transformation des données
+            df_pca = pca.transform(df_explicatives)
+            
+            # Créer le DataFrame avec les composantes principales
+            df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
+
+            # Ajouter le target si nécessaire
+            if not use_target:
+                df_target = df_scaled[target]
+                df_scaled = pd.concat([df_pca, df_target], axis=1)
+            else:
+                df_scaled = df_pca.copy()
+
+            # Calcul des inerties (variances expliquées par composante)
+            pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
+            pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+
+            # Création du DataFrame pour la variance expliquée et cumulative
+            pca_infos = pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+            pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
+            pca_infos['Nombre de composantes'] += 1
+
+            # Visualisation avec Plotly (ou Seaborn si tu préfères)
+            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                        markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+            fig.update_layout(
+                xaxis_title='Nombre de composantes principales',
+                yaxis_title='Variance (%)',
+                legend_title='Type de variance',
+                width=900, height=600
+            )
+    
+        # Finir le traitement
+        wrang_finished = True
+        # Afficher le descriptif de la base de données
+        st.write("### Descriptif de la base de données :")
+        st.write("**Nombre d'observations :**", df.shape[0])
+        st.write("**Nombre de variables :**", df.shape[1])
+            
+        if df is not None:
+            description = []
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    var_type = 'Numérique'
+                    n_modalites = np.nan
+                else:
+                    var_type = 'Catégorielle'
+                    n_modalites = df[col].nunique()
+                
+                description.append({
+                    'Variable': col,
+                    'Type': var_type,
+                    'Nb modalités': n_modalites
+                })
+            st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
+            
+            st.write("### Diagnostique de la base de données :")
+            st.write("**Matrice de corrélation entre les valeurs manquantes:**")
+            st.dataframe(corr_mat, use_container_width=True)
+            st.write("**Proportion de valeurs manquantes par variable:**")
+            st.dataframe(prop_nan, use_container_width=True)
+            st.dataframe(scores_supervised, use_container_width=True)
+            st.write("**Nombre d'outliers traités:**", nb_outliers)
+            
+            st.write("### Rapport du preprocessing :")                
+            st.write("**Nombre de doublons traités:**", len_diff)
+            st.write("**Nombre d'observations supprimées car la variable cible est manquante:**", len_diff_nan_target)
+            st.write("**Résumé des méthodes d'imputation utilisées:**")
+            st.dataframe(imputation_report, use_container_width=True)
+            st.write("**Score de l'imputation supervisée :**")
+        
+            if use_pca:
+                st.plotly_chart(fig)
+        
+        # Téléchargement du fichier encodé
+        if df is not None and wrang_finished and not pb:
+            df = df_scaled.copy()
+            csv_buffer = io.StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            
+            # Afficher l'aperçu des données traitées
+            st.write("### Aperçu des données traitées :")
+            st.dataframe(df_scaled)
+
+            # Afficher le bouton pour télécharger le fichier
+            st.download_button(
+                label="📥 Télécharger les données traitées",
+                data=csv_data,
+                file_name="data.csv",
+                mime="text/csv"
+            )
         
 if valid_mod:
     # Effectuer la modélisation
@@ -1283,37 +1636,93 @@ if valid_mod:
     # 7. Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
 
-    # Dictionnaire des métriques
-    if task == "Regression":
-        scoring_dict = {
-            "R² Score": "r2",
-            "Mean Squared Error": "neg_mean_squared_error",
-            "Root Mean Squared Error": "neg_root_mean_squared_error",
-            "Mean Absolute Error": "neg_mean_absolute_error",
-            "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
-        }
-    else:
-        scoring_dict = {
-            "Accuracy": "accuracy",
-            "F1 Score (Weighted)": "f1_weighted",
-            "Precision (Weighted)": "precision_weighted",
-            "Recall (Weighted)": "recall_weighted"
-        }
-        
-    df_scores, df_bias_variance = evaluate_and_decompose(
-        models=list_models,
-        X=X_train,  # ou X selon comment tu appelles tes données
-        y=y_train,
-        task=task,
-        scoring_dict=scoring_dict,
-        cv=cv,
-        n_jobs=-1,
-        random_seed=42)                
-        
-    # Affichage ou export, selon ce que tu veux en faire
-    st.subheader("Validation des modèles")
-    st.dataframe(df_scores)
+    list_score = []
+    for model in list_models:  # Utilise les vrais objets modèles
+        scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
+        mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
+        std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
 
+        list_score.append({
+            'Best Model': str(model),  # Affichage du nom seulement
+            'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
+            'Std Scores': std_scores
+        })
+
+    df_score = pd.DataFrame(list_score)  
+
+    # Dictionnaires des métriques
+    metrics_regression = {
+        "R² Score": "r2",
+        "Mean Squared Error": "neg_mean_squared_error",
+        "Root Mean Squared Error": "neg_root_mean_squared_error",
+        "Mean Absolute Error": "neg_mean_absolute_error",
+        "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
+    }
+
+    metrics_classification = {
+        "Accuracy": "accuracy",
+        "F1 Score (Weighted)": "f1_weighted",
+        "Precision (Weighted)": "precision_weighted",
+        "Recall (Weighted)": "recall_weighted"
+    }
+
+    # Inverser les dictionnaires des métriques
+    inv_metrics = {v: k for k, v in metrics_regression.items()} if task == "Regression" else {v: k for k, v in metrics_classification.items()}
+
+    for metric in scoring_eval:
+        df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
+        df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
+        
+    # Renommage des colonnes pour des noms plus lisibles
+    for metric in scoring_eval:
+        clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
+        df_score.rename(columns={
+            f"Mean {metric}": f"Mean - {clean_metric}",
+            f"Std {metric}": f"Std - {clean_metric}"
+        }, inplace=True)
+
+    # Derniers traitement
+    df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
+    df_score.index = df_train2.index
+    df_score2 = df_score.drop(columns='Best Model')
+    st.subheader("Validation des modèles")
+    st.dataframe(df_score2, use_container_width=True)
+    
+    # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
+    bias_variance_results = []
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
+            model, task=task,
+            X=X_train.values, y=y_train.values,
+            cv=cv)
+
+        # Création d'un dictionnaire pour stocker les résultats
+        result = {
+            "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
+            "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
+            "Bias Relative": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
+            "Variance Relative": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+        }
+        
+        # Logique de conclusion en fonction du biais relatif et de la variance relative
+        if abs(bias_relative) > 0.2 and var_relative > 0.2:
+            result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
+        elif abs(bias_relative) > 0.2:
+            result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
+        elif var_relative > 0.2:
+            result["Conclusion"] = "Variance élevée : suspicion de sur-ajustement"
+        else:
+            result["Conclusion"] = "Bien équilibré"
+        
+        # Ajout du dictionnaire à la liste des résultats
+        bias_variance_results.append(result)            
+        
+    # Création du DataFrame
+    df_bias_variance = pd.DataFrame(bias_variance_results)
+    df_bias_variance.index = df_train2.index
+
+    # Affichage dans Streamlit
     st.subheader("Etude Bias-Variance")
     st.dataframe(df_bias_variance)
 
