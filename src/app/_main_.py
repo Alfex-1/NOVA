@@ -1433,7 +1433,7 @@ if valid_wrang:
                 
                 # Préparer le téléchargement du dossier zip contenant les deux fichiers
                 st.write("### Aperçu des données traitées :")
-                st.dataframe(df_train)
+                st.dataframe(df_train_scaled, use_container_width=True, hide_index=True)
 
                 # Télécharger le fichier zip contenant les deux bases
                 st.download_button(
