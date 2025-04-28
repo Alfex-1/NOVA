@@ -15,6 +15,7 @@ NOVA est une application conçue pour les Data Scientists qui en ont marre de pe
 - comparer les performances de manière rigoureuse.
 
 Avec NOVA, vous vous concentrez sur l’essentiel : prendre des décisions basées sur des résultats solides.
+Lien vers l'application Streamlit : [NOVA.streamlit.app](https://nova-tools.streamlit.app/)
 
 ## Prérequis
 
