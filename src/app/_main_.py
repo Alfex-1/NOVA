@@ -509,45 +509,49 @@ def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, t
     df_train = df_train.copy()
     df_test = df_test.copy() if df_test is not None else None
 
-    # Assurer que l'indice est le même pour df_train et features
+    # Extraire uniquement les variables numériques
     features = df_train.drop(columns=[target], errors='ignore').select_dtypes(include=[np.number])
+
+    # Virer les lignes où il manque des valeurs (seulement pour l'outlier detection)
     valid_idx = features.dropna().index
-    features = features.loc[valid_idx]
+    features_valid = features.loc[valid_idx]
 
-    if features.shape[1] == 0:
+    if features_valid.shape[1] == 0:
         raise ValueError("Aucune variable numérique exploitable dans df_train.")
+    if features_valid.shape[0] < 10:
+        raise ValueError("Pas assez de données valides pour détecter les outliers.")
 
-    # Détection sur train
+    # Détection sur les données sans NaN
     iso = IsolationForest(n_estimators=500, contamination=contamination, random_state=42, n_jobs=-1)
-    out_iso = iso.fit_predict(features)
-    lof = LocalOutlierFactor(n_neighbors=20, contamination=contamination)
-    out_lof = lof.fit_predict(features)
+    out_iso = iso.fit_predict(features_valid)
 
-    # Aligner l'index de outliers avec df_train
+    lof = LocalOutlierFactor(n_neighbors=20, contamination=contamination, n_jobs=-1)
+    out_lof = lof.fit_predict(features_valid)
+
+    # Fusion des deux détecteurs
     outliers = ((out_iso == -1) & (out_lof == -1)).astype(int)
-    outliers = pd.Series(outliers, index=features.index)  # S'assurer que l'index est le même
+    outliers = pd.Series(outliers, index=features_valid.index)
 
-    # Vérifier la cohérence des indices
-    assert outliers.shape[0] == df_train.shape[0], f"Mismatch in number of rows: {outliers.shape[0]} vs {df_train.shape[0]}"
-
-    # Définir bornes winsorization sur train
+    # Définir bornes winsorization sur les données sans outliers
     bounds = {}
     for col in features.columns:
-        mask = (outliers == 1)
-        if mask.any():
-            lower = np.percentile(df_train.loc[~mask, col], 1)
-            upper = np.percentile(df_train.loc[~mask, col], 99)
-        else:
-            lower = np.percentile(df_train[col], 1)
-            upper = np.percentile(df_train[col], 99)
-        bounds[col] = (lower, upper)
+        if col in features_valid.columns:
+            mask = (outliers == 1)
+            if mask.any():
+                lower = np.percentile(features_valid.loc[~mask, col], 1)
+                upper = np.percentile(features_valid.loc[~mask, col], 99)
+            else:
+                lower = np.percentile(features_valid[col], 1)
+                upper = np.percentile(features_valid[col], 99)
+            bounds[col] = (lower, upper)
 
     # Winsorize train
     n_modif_train = 0
     for col, (lower, upper) in bounds.items():
-        original = df_train[col].copy()
-        df_train[col] = np.clip(df_train[col], lower, upper)
-        n_modif_train += (original != df_train[col]).sum()
+        if col in df_train.columns:
+            original = df_train[col].copy()
+            df_train[col] = np.clip(df_train[col], lower, upper)
+            n_modif_train += (original != df_train[col]).sum()
 
     # Winsorize test si dispo
     n_modif_test = 0
