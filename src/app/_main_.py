@@ -1257,7 +1257,7 @@ if valid_wrang:
             df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=cv)
+        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
         
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
@@ -1463,7 +1463,7 @@ if valid_wrang:
             df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_imputed, scores_supervised, imputation_report = impute_missing_values(nb_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=cv)
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(nb_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
     
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
