@@ -1283,7 +1283,7 @@ if valid_wrang:
                 
         # Appliquer les transformations individuelles
         if not scale_all_data:
-            df_train_scaled, df_test_scaled = transform_data(df_train_scaled, df_test_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+            df_train_scaled, df_test_scaled = transform_data(df_train_imputed, df_test_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
 
         # Application de l'ACP en fonction du choix de l'utilisateur
         if use_pca:
@@ -1484,7 +1484,7 @@ if valid_wrang:
     
         # Appliquer les transformations individuelles
         if not scale_all_data:
-            df_scaled = transform_data(df_scaled, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+            df_scaled = transform_data(df_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
     
         # Application de l'ACP en fonction du choix de l'utilisateur
         if use_pca:
