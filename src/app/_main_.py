@@ -1390,7 +1390,7 @@ if valid_wrang:
                 })
             st.dataframe(pd.DataFrame(description_train), use_container_width=True, hide_index=True)
         
-            with st.expander("Diagnostic des données", expanded=True):
+            with st.expander("Diagnostic des données", expanded=False):
                 st.write("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
                 st.dataframe(corr_mat_train, use_container_width=True)
 
@@ -1398,12 +1398,12 @@ if valid_wrang:
                 st.dataframe(corr_mat_test, use_container_width=True)
 
                 st.write("**Proportion de valeurs manquantes par variable (train), en % :**")
-                st.dataframe(prop_nan_train, use_container_width=True)
+                st.dataframe(prop_nan_train.sort_values(by='NaN proportion', ascending=False), use_container_width=True)
 
                 st.write("**Proportion de valeurs manquantes par variable (test), en % :**")
-                st.dataframe(prop_nan_test, use_container_width=True)
+                st.dataframe(prop_nan_test.sort_values(by='NaN proportion', ascending=False), use_container_width=True)
 
-            with st.expander("Rapport du preprocessing", expanded=True):
+            with st.expander("Rapport du preprocessing", expanded=False):
                 st.write("**Nombre de doublons traités :**", len_diff)
                 st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
@@ -1425,8 +1425,8 @@ if valid_wrang:
                 with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                     # Sauvegarder train et test dans des fichiers CSV dans le zip
                     with io.StringIO() as csv_buffer_train, io.StringIO() as csv_buffer_test:
-                        df_train.to_csv(csv_buffer_train, index=False)
-                        df_test.to_csv(csv_buffer_test, index=False)
+                        df_train_scaled.to_csv(csv_buffer_train, index=False)
+                        df_test_scaled.to_csv(csv_buffer_test, index=False)
                         
                         zip_file.writestr("train.csv", csv_buffer_train.getvalue())
                         zip_file.writestr("test.csv", csv_buffer_test.getvalue())
@@ -1572,14 +1572,14 @@ if valid_wrang:
                 })
             st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
             
-            with st.expander("Diagnostic des données", expanded=True):
+            with st.expander("Diagnostic des données", expanded=False):
                 st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
                 st.dataframe(corr_mat, use_container_width=True)
                 
                 st.write("**Proportion de valeurs manquantes par variable (en %) :**")
                 st.dataframe(prop_nan.sort_values(by='NaN Proportion', ascending=False), use_container_width=True)
 
-            with st.expander("Rapport du preprocessing", expanded=True):
+            with st.expander("Rapport du preprocessing", expanded=False):
                 st.write("**Nombre de doublons traités :**", len_diff)
                 st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
