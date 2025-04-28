@@ -966,10 +966,10 @@ if df is not None:
         split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
         
         if split_data:
-            test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
-            test_size = test_size/100
+            train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
+            train_size = train_size/100
             # Division
-            df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
+            df_train, df_test = train_test_split(df, train_size=train_size, shuffle=True, random_state=42)
         
         # Demander si l'utilisateur souhaite supprimer les doublons
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
@@ -1109,8 +1109,8 @@ if df is not None:
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
         
         # Division des données
-        test_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
-        test_size=test_size/100
+        train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
+        train_size=train_size/100
         
         st.sidebar.subheader("Choix des modèles")
 
@@ -1233,14 +1233,16 @@ if df is not None:
 if valid_wrang:
     # Faire les traitements selon si split_data = True
     if split_data:
-        df_train, df_test = train_test_split(df, test_size=test_size, shuffle=True, random_state=42)
+        df_train, df_test = train_test_split(df, train_size=train_size, shuffle=True, random_state=42)
         
         # Suppression des doublons
         if drop_dupli:
             len_before_dupli =len(df_train)
             df_train = df_train.drop_duplicates()
             len_after_dupli =len(df_train)
-            len_diff = len_before_dupli - len_after_dupli            
+            len_diff = len_before_dupli - len_after_dupli
+        else:
+            len_diff = "Les doublons n'ont pas été traités."       
         
         # Etude des valeurs manquantes
         len_before_nan_target = len(df_train)
@@ -1387,28 +1389,31 @@ if valid_wrang:
                     'Nb modalités': n_modalites
                 })
             st.dataframe(pd.DataFrame(description_train), use_container_width=True, hide_index=True)
-
-        # Diagnostic des données
-        st.write("### Diagnostique des bases de données :")
-        st.write("**Matrice de corrélation entre les valeurs manquantes (train):**")
-        st.dataframe(corr_mat_train, use_container_width=True)
-        st.write("**Matrice de corrélation entre les valeurs manquantes (test):**")
-        st.dataframe(corr_mat_test, use_container_width=True)
-        st.write("**Proportion de valeurs manquantes par variable (train):**")
-        st.dataframe(prop_nan_train, use_container_width=True)
-        st.write("**Proportion de valeurs manquantes par variable (test):**")
-        st.dataframe(prop_nan_test, use_container_width=True)
-        st.write("**Nombre d'outliers traités:**", nb_outliers)
-
-        # Rapport du preprocessing
-        st.write("### Rapport du preprocessing :")
-        st.write("**Nombre de doublons traités:**", len_diff)
-        st.write("**Nombre d'observations supprimées car la variable cible est manquante:**", len_diff_nan_target)
-        st.write("**Résumé des méthodes d'imputation utilisées:**")
-        st.dataframe(imputation_report, use_container_width=True)
-        st.write("**Score de l'imputation supervisée :**")
-        st.dataframe(scores_supervised, use_container_width=True)        
         
+            with st.expander("Diagnostic des données", expanded=True):
+                st.write("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
+                st.dataframe(corr_mat_train, use_container_width=True)
+
+                st.write("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
+                st.dataframe(corr_mat_test, use_container_width=True)
+
+                st.write("**Proportion de valeurs manquantes par variable (train), en % :**")
+                st.dataframe(prop_nan_train, use_container_width=True)
+
+                st.write("**Proportion de valeurs manquantes par variable (test), en % :**")
+                st.dataframe(prop_nan_test, use_container_width=True)
+
+            with st.expander("Rapport du preprocessing", expanded=True):
+                st.write("**Nombre de doublons traités :**", len_diff)
+                st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
+                st.write("**Nombre d'outliers traités :**", nb_outliers)
+
+                st.write("**Résumé des méthodes d'imputation utilisées :**")
+                st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+
+                st.write("**Score de l'imputation supervisée :**")
+                st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+    
         # Affichage du graphique PCA si nécessaire
         if use_pca:
             st.plotly_chart(fig)
@@ -1446,7 +1451,7 @@ if valid_wrang:
             len_after_dupli = len(df)
             len_diff = len_before_dupli - len_after_dupli
         else:
-            len_diff = 0
+            len_diff = "Les doublons n'ont pas été traités."
             
         # Etude des valeurs manquantes
         len_before_nan_target = len(df)
@@ -1567,20 +1572,23 @@ if valid_wrang:
                 })
             st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
             
-            st.write("### Diagnostique de la base de données :")
-            st.write("**Matrice de corrélation entre les valeurs manquantes:**")
-            st.dataframe(corr_mat, use_container_width=True)
-            st.write("**Proportion de valeurs manquantes par variable:**")
-            st.dataframe(prop_nan, use_container_width=True)
-            st.dataframe(scores_supervised, use_container_width=True)
-            st.write("**Nombre d'outliers traités:**", nb_outliers)
-            
-            st.write("### Rapport du preprocessing :")                
-            st.write("**Nombre de doublons traités:**", len_diff)
-            st.write("**Nombre d'observations supprimées car la variable cible est manquante:**", len_diff_nan_target)
-            st.write("**Résumé des méthodes d'imputation utilisées:**")
-            st.dataframe(imputation_report, use_container_width=True)
-            st.write("**Score de l'imputation supervisée :**")
+            with st.expander("Diagnostic des données", expanded=True):
+                st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
+                st.dataframe(corr_mat, use_container_width=True)
+                
+                st.write("**Proportion de valeurs manquantes par variable (en %) :**")
+                st.dataframe(prop_nan.sort_values(by='NaN Proportion', ascending=False), use_container_width=True)
+
+            with st.expander("Rapport du preprocessing", expanded=True):
+                st.write("**Nombre de doublons traités :**", len_diff)
+                st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
+                st.write("**Nombre d'outliers traités :**", nb_outliers)
+
+                st.write("**Résumé des méthodes d'imputation utilisées :**")
+                st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+
+                st.write("**Score de l'imputation supervisée :**")
+                st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
         
             if use_pca:
                 st.plotly_chart(fig)
@@ -1594,7 +1602,7 @@ if valid_wrang:
             
             # Afficher l'aperçu des données traitées
             st.write("### Aperçu des données traitées :")
-            st.dataframe(df_scaled)
+            st.dataframe(df_scaled, use_container_width=True, hide_index=True)
 
             # Afficher le bouton pour télécharger le fichier
             st.download_button(
@@ -1607,14 +1615,14 @@ if valid_wrang:
 if valid_mod:
     # Effectuer la modélisation
 
-    # 1. Division des données
+    # Division des données
     X = df.drop(columns=target)
     y = df[target]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, shuffle=True)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size, shuffle=True)
 
     if use_loocv:
         cv = X_train.shape[0]
-    # 2. Choisir le meilleur modèle
+    # Choisir le meilleur modèle
     results = []
     for model in models:  
         # Déterminer chaque modèle à optimiser
@@ -1639,7 +1647,7 @@ if valid_mod:
       
     st.dataframe(df_train2.drop(columns='Best Params'), use_container_width=True)
     
-    # 7. Evaluer les meilleurs modèles
+    # Evaluer les meilleurs modèles
     list_models = df_train['Best Model'].tolist()
 
     list_score = []
@@ -1694,7 +1702,7 @@ if valid_mod:
     st.subheader("Validation des modèles")
     st.dataframe(df_score2, use_container_width=True)
     
-    # 8. Appliquer le modèle : calcul-biais-variance et matrice de confusion    
+    # Appliquer le modèle : calcul-biais-variance et matrice de confusion    
     bias_variance_results = []
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
