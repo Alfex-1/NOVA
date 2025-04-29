@@ -1611,7 +1611,7 @@ if valid_mod:
                                                             X_train=X_train, y_train=y_train,
                                                             cv=cv, scoring=scoring_comp,
                                                             multi_class=multi_class,
-                                                            n_trial=n_trail, n_jobs=-1)
+                                                            n_trial=n_trial, n_jobs=-1)
         
         # Ajouter les résultats à la liste
         results.append({
