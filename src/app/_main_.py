@@ -642,13 +642,15 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             objective = 'reg:squarederror'
             eval_metric = 'rmse'
         elif task == 'Classification':
-            objective = 'binary:logistic'  # pour la classification binaire
-            eval_metric = 'logloss'
-            num_class = 1  # binaire, pas nécessaire de définir num_class ici
-        else:  # pour la classification multiclasse
-            objective = 'multi:softmax'
-            eval_metric = 'mlogloss'
-            num_class = len(y_train.unique())  # Nombre de classes unique dans la variable cible
+            if multi_class:
+                objective = 'multi:softmax'
+                objective = 'binary:logistic'  # pour la classification binaire
+                eval_metric = 'logloss'
+                num_class = 1  # binaire, pas nécessaire de définir num_class ici
+            else:  # pour la classification multiclasse
+                objective = 'multi:softmax'
+                eval_metric = 'mlogloss'
+                num_class = len(y_train.unique())  # Nombre de classes unique dans la variable cible
 
         # Hyperparamètres à optimiser
         param = {
@@ -1194,38 +1196,7 @@ if df is not None:
                 "Nombre de folds (CV)",
                 min_value=2, max_value=20,
                 value=7, step=1,
-                disabled=use_loocv)            
-            
-        # Demander le temps disponible selon les choix de l'utilisateur
-        time_sup= st.sidebar.checkbox("Voulez vous prendre plus de temps pour améliorer les résultats ?")
-        
-        # Pondération de complexité selon les modèles
-        complexity_weights = {"Linear Regression": 1, "Logistic Regression": 2,
-                              "KNN": 4, "Random Forest": 8,
-                              "LightGBM": 7, "XGBoost": 7}
-        
-        # Paramètres de base
-        max_global_trials = 50
-        max_trials_hard_limit = 150
-        
-        # Taille des données
-        n_rows, n_cols = df.shape
-        data_penalty = (n_rows / 1e6) * (n_cols / 5)
-
-        # Complexité totale des modèles
-        model_penalty = sum(complexity_weights.get(m, 3) for m in models)
-        
-        # Calcul du budget brut
-        raw_score = data_penalty * model_penalty
-        # Inversion du score pour définir le nombre d'essais
-        trial = max_global_trials / (1 + raw_score)
-
-        # Ajout de la préférence utilisateur
-        if time_sup:
-            trial = min(150, int(round(trial * 1.5)))
-        trial = int(min(max_trials_hard_limit, max(5, round(trial))))
-        
-        repeats = trial
+                disabled=use_loocv)
             
         st.sidebar.subheader("Enregistrement des modèles")
         # Demander à l'utilisateur où il souhaite enregistrer les modèles
@@ -1630,11 +1601,17 @@ if valid_mod:
     results = []
     for model in models:  
         # Déterminer chaque modèle à optimiser
+        if model in ["Linear Regression", "Logistic Regression", "KNN"]:
+            n_trial = 80
+        else:
+            n_trail = 40
+        repeats = n_trail
+        
         best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
                                                             X_train=X_train, y_train=y_train,
                                                             cv=cv, scoring=scoring_comp,
                                                             multi_class=multi_class,
-                                                            n_trials=100, n_jobs=-1)
+                                                            n_trial=n_trail, n_jobs=-1)
         
         # Ajouter les résultats à la liste
         results.append({
@@ -1775,7 +1752,7 @@ if valid_mod:
     
     # Feature importance
     st.subheader(f"Importance des variables")
-    for index, mdl in df_score['Best Model'].items():
+    for idx, mdl in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         model.fit(X_train, y_train)
         
@@ -1811,7 +1788,7 @@ if valid_mod:
     for index, mdl in df_score['Best Model'].items(): 
         model = instance_model(idx, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
-            model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
+            model, X_train, y_train, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
         )
 
