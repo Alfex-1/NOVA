@@ -1604,8 +1604,8 @@ if valid_mod:
         if model in ["Linear Regression", "Logistic Regression", "KNN"]:
             n_trial = 80
         else:
-            n_trail = 40
-        repeats = n_trail
+            n_trial = 40
+        repeats = n_trial
         
         best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
                                                             X_train=X_train, y_train=y_train,
@@ -1788,7 +1788,7 @@ if valid_mod:
     for index, mdl in df_score['Best Model'].items(): 
         model = instance_model(idx, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
-            model, X_train, y_train, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
+            model, X_train, y_train, cv=cv, scoring=scoring_comp,
             train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
         )
 
