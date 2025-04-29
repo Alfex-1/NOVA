@@ -1777,7 +1777,7 @@ if valid_mod:
         plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
         plt.xticks(fontsize=6)
         plt.xlabel("Importance", fontsize=7)
-        plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
+        plt.title(f"Importance des variables par permutation - {idx}", fontsize=8)
         plt.gca().invert_yaxis()
         st.pyplot(plt)
         plt.close()
@@ -1785,7 +1785,7 @@ if valid_mod:
     # Courbes d'apprentissage
     st.subheader(f"Courbes d'apprentissage")
     
-    for index, mdl in df_score['Best Model'].items(): 
+    for idx, mdl in df_score['Best Model'].items(): 
         model = instance_model(idx, df_train2, task)       
         train_sizes, train_scores, test_scores = learning_curve(
             model, X_train, y_train, cv=cv, scoring=scoring_comp,
@@ -1798,7 +1798,7 @@ if valid_mod:
         plt.figure(figsize=(5, 3))
         plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
         plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
-        plt.title(f"Learning Curve - {index}", fontsize=8)
+        plt.title(f"Learning Curve - {idx}", fontsize=8)
         plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
         plt.ylabel("Score", fontsize=7)
         plt.legend(loc="best", fontsize=6)
