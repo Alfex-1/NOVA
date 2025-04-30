@@ -12,4 +12,4 @@ scipy
 streamlit
 mlflow
 joblib
-shape
+shap
