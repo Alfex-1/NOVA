@@ -1688,7 +1688,7 @@ if valid_mod:
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
 
-        if task == 'Regression' and isinstance(model, LinearRegression):
+        if task == 'Regression' and isinstance(model, (LinearRegression, ElasticNet, Ridge, Lasso)):
             model.fit(X_train, y_train)
             coefs = model.coef_
             df_coefs = pd.DataFrame({
@@ -1728,7 +1728,7 @@ if valid_mod:
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
 
-        if not isinstance(model, (LinearRegression, LogisticRegression)):
+        if not isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
             try:
                 explainer = shap.Explainer(model, X_train)
                 shap_values = explainer(X_train)
