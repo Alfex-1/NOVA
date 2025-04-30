@@ -1697,7 +1697,7 @@ if valid_mod:
             }).sort_values(by='Coefficient', key=abs, ascending=False)
             df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
             st.subheader(f"Coefficients – Régression Linéaire")
-            st.dataframe(df_coefs)
+            st.dataframe(df_coefs, use_container_width=True, hide_index=True)
 
         elif task == 'Classification' and isinstance(model, LogisticRegression):
             model.fit(X_train, y_train)
@@ -1708,7 +1708,7 @@ if valid_mod:
             }).sort_values(by='Coefficient', key=abs, ascending=False)
             df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
             st.subheader(f"Coefficients – Régression Logistique")
-            st.dataframe(df_coefs)                  
+            st.dataframe(df_coefs, use_container_width=True, hide_index=True)                  
     
     # Calculer les odds-ratios pour la régression logistique
     for idx, best_model in df_score['Best Model'].items():
