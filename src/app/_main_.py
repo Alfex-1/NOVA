@@ -29,6 +29,7 @@ import streamlit as st
 from PIL import Image
 from joblib import Parallel, delayed
 import zipfile
+import shap
 
 def load_file(file_data):
     byte_data = file_data.read()
@@ -1683,7 +1684,59 @@ if valid_mod:
     st.subheader("Validation des modèles")
     st.dataframe(df_score2, use_container_width=True)
     
-    # Appliquer le modèle : calcul-biais-variance et matrice de confusion    
+    # Afficher les coefficients des modèles linéaires
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+
+        if task == 'Regression' and isinstance(model, LinearRegression):
+            coefs = model.coef_
+            df_coefs = pd.DataFrame({
+                'Variable': X_train.columns,
+                'Coefficient': coefs
+            }).sort_values(by='Coefficient', key=abs, ascending=False)
+            df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+            st.subheader(f"Coefficients – Régression Linéaire")
+            st.dataframe(df_coefs)
+
+        elif task == 'Classification' and isinstance(model, LogisticRegression):
+            coefs = model.coef_[0]
+            df_coefs = pd.DataFrame({
+                'Variable': X_train.columns,
+                'Coefficient': coefs
+            }).sort_values(by='Coefficient', key=abs, ascending=False)
+            df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+            st.subheader(f"Coefficients – Régression Logistique")
+            st.dataframe(df_coefs)                  
+    
+    # Calculer les odds-ratios pour la régression logistique
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        if isinstance(model, LogisticRegression) and task == 'Classification':
+            odds_ratios = np.exp(model.coef_[0])
+            df_odds = pd.DataFrame({
+                'Variable': X_train.columns,
+                'Odds Ratio': odds_ratios
+            }).sort_values(by='Odds Ratio', ascending=False)
+            df_odds['Odds Ratio'] = df_odds['Odds Ratio'].round(2)
+            st.dataframe(df_odds)
+    
+    # Afficher SHAPE
+    st.subheader("Interprétation des modèles (SHAPE)")       
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+
+        if not isinstance(model, (LinearRegression, LogisticRegression)):
+            try:
+                explainer = shap.Explainer(model, X_train)
+                shap_values = explainer(X_train)
+
+                st.subheader(f"Résumé par SHAPE – Modèle {idx}")
+                shap.summary_plot(shap_values, X_train, show=False)
+                st.pyplot(bbox_inches='tight')
+            except Exception as e:
+                st.warning(f"SHAP non applicable pour le modèle {idx}")
+    
+    # Appliquer le modèle : calcul-biais-variance    
     bias_variance_results = []
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
@@ -1696,8 +1749,8 @@ if valid_mod:
         result = {
             "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
             "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
-            "Bias Relative": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
-            "Variance Relative": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+            "Bias relatif": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
+            "Variance relatif": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
         }
         
         # Logique de conclusion en fonction du biais relatif et de la variance relative
