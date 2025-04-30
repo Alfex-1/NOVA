@@ -1689,6 +1689,7 @@ if valid_mod:
         model = instance_model(idx, df_train2, task)
 
         if task == 'Regression' and isinstance(model, LinearRegression):
+            model.fit(X_train, y_train)
             coefs = model.coef_
             df_coefs = pd.DataFrame({
                 'Variable': X_train.columns,
@@ -1699,6 +1700,7 @@ if valid_mod:
             st.dataframe(df_coefs)
 
         elif task == 'Classification' and isinstance(model, LogisticRegression):
+            model.fit(X_train, y_train)
             coefs = model.coef_[0]
             df_coefs = pd.DataFrame({
                 'Variable': X_train.columns,
@@ -1712,6 +1714,7 @@ if valid_mod:
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
         if isinstance(model, LogisticRegression) and task == 'Classification':
+            model.fit(X_train, y_train)
             odds_ratios = np.exp(model.coef_[0])
             df_odds = pd.DataFrame({
                 'Variable': X_train.columns,
