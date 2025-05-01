@@ -1776,10 +1776,12 @@ if valid_mod:
         try:
             # SHAP - modèles linéaires
             if isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
-                explainer = shap.LinearExplainer(model, X_train, feature_perturbation="interventional")
+                explainer = shap.LinearExplainer(model, X_train)
                 shap_values = explainer(X_train)
-                shap_plot = shap.summary_plot(shap_values, X_train, show=False)
-                st.pyplot(shap_plot)
+                plt.clf()
+                shap.summary_plot(shap_values, X_train, show=False)
+                fig = plt.gcf()
+                st.pyplot(fig)
 
             # LIME - uniquement pour KNN
             elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
@@ -1793,8 +1795,10 @@ if valid_mod:
             else:
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(X_train)
+                plt.clf()
                 shap.summary_plot(shap_values, X_train, show=False)
-                st.pyplot()
+                fig = plt.gcf()
+                st.pyplot(fig)
 
         except Exception as e:
             st.warning(f"Erreur pour {idx} : {e}")    
