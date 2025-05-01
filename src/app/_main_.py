@@ -1790,6 +1790,7 @@ if valid_mod:
                 lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
                 explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
                 html = explanation.as_html()
+                html = html.replace("<body>", '<body style="background-color:white; color:black;">')
                 components.html(html, height=800, scrolling=True)
 
             # SHAP - arbres (RandomForest, XGBoost, LightGBM)
