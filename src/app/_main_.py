@@ -1734,8 +1734,8 @@ if valid_mod:
                 shap_values = explainer(X_train)
 
                 st.subheader(f"Résumé par SHAPE – Modèle {idx}")
-                shap.summary_plot(shap_values, X_train, show=False)
-                st.pyplot(bbox_inches='tight')
+                shap_plot = shap.summary_plot(shap_values, X_train, show=False)
+                st.pyplot(shap_plot)
             except Exception as e:
                 st.warning(f"SHAP non applicable pour le modèle {idx}")
     
