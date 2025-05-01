@@ -7,7 +7,6 @@ import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
 from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
-from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
@@ -31,6 +30,8 @@ from joblib import Parallel, delayed
 import zipfile
 import shap
 from lime.lime_tabular import LimeTabularExplainer
+import streamlit.components.v1 as components
+
 
 def load_file(file_data):
     byte_data = file_data.read()
