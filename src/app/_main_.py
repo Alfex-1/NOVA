@@ -30,6 +30,7 @@ from PIL import Image
 from joblib import Parallel, delayed
 import zipfile
 import shap
+from lime.lime_tabular import LimeTabularExplainer
 
 def load_file(file_data):
     byte_data = file_data.read()
@@ -1724,20 +1725,36 @@ if valid_mod:
             st.dataframe(df_odds)
     
     # Afficher SHAPE
-    st.subheader("Interprétation des modèles (SHAPE)")       
+    st.subheader("Interprétation globale ou locale des modèles")       
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
 
-        if not isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
-            try:
-                explainer = shap.Explainer(model, X_train)
+        try:
+            # SHAP - modèles linéaires
+            if isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
+                explainer = shap.LinearExplainer(model, X_train, feature_perturbation="interventional")
                 shap_values = explainer(X_train)
-
-                st.subheader(f"Résumé par SHAPE – Modèle {idx}")
                 shap_plot = shap.summary_plot(shap_values, X_train, show=False)
                 st.pyplot(shap_plot)
-            except Exception as e:
-                st.warning(f"SHAP non applicable pour le modèle {idx}")
+
+            # LIME - uniquement pour KNN
+            elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
+                mode = "classification" if task == "classification" else "regression"
+                lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
+                explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
+                explanation.save_to_file(f"lime_{idx}.html")
+                st.info(f"LIME explainer généré pour le modèle {idx} (voir lime_{idx}.html)")
+
+            # SHAP - arbres (RandomForest, XGBoost, LightGBM)
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_train)
+                shap.summary_plot(shap_values, X_train, show=False)
+                st.pyplot()
+
+        except Exception as e:
+            st.warning(f"Erreur pour {idx} : {e}")    
+    
     
     # Appliquer le modèle : calcul-biais-variance    
     bias_variance_results = []
