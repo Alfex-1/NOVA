@@ -1785,7 +1785,7 @@ if valid_mod:
 
             # LIME - uniquement pour KNN
             elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-                mode = "classification" if task == "Classification" else "Regression"
+                mode = "classification" if task == "Classification" else "regression"
                 lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
                 explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
                 html = explanation.as_html()
