@@ -1785,11 +1785,11 @@ if valid_mod:
 
             # LIME - uniquement pour KNN
             elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-                mode = "classification" if task == "classification" else "regression"
+                mode = "classification" if task == "Classification" else "Regression"
                 lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
                 explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
-                explanation.save_to_file(f"lime_{idx}.html")
-                st.info(f"LIME explainer généré pour le modèle {idx} (voir lime_{idx}.html)")
+                html = explanation.as_html()
+                components.html(html, height=800, scrolling=True)
 
             # SHAP - arbres (RandomForest, XGBoost, LightGBM)
             else:
