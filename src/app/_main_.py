@@ -1791,7 +1791,7 @@ if valid_mod:
                 explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
                 html = explanation.as_html()
                 html = html.replace("<body>", '<body style="background-color:white; color:black;">')
-                components.html(html, height=800, scrolling=True)
+                components.html(html, height=450, scrolling=True)
 
             # SHAP - arbres (RandomForest, XGBoost, LightGBM)
             else:
