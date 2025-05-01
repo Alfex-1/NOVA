@@ -1692,24 +1692,67 @@ if valid_mod:
         if task == 'Regression' and isinstance(model, (LinearRegression, ElasticNet, Ridge, Lasso)):
             model.fit(X_train, y_train)
             coefs = model.coef_
+            intercept = model.intercept_
             df_coefs = pd.DataFrame({
                 'Variable': X_train.columns,
                 'Coefficient': coefs
             }).sort_values(by='Coefficient', key=abs, ascending=False)
             df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+            
+            # Ajout de la constante
+            df_intercept = pd.DataFrame({
+                'Variable': ['Intercept'],
+                'Coefficient': [intercept if np.isscalar(intercept) else intercept[0]]
+            })
+            df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+            
+            # Affichage
             st.subheader(f"Coefficients – Régression Linéaire")
             st.dataframe(df_coefs, use_container_width=True, hide_index=True)
 
         elif task == 'Classification' and isinstance(model, LogisticRegression):
             model.fit(X_train, y_train)
-            coefs = model.coef_[0]
-            df_coefs = pd.DataFrame({
-                'Variable': X_train.columns,
-                'Coefficient': coefs
-            }).sort_values(by='Coefficient', key=abs, ascending=False)
-            df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
-            st.subheader(f"Coefficients – Régression Logistique")
-            st.dataframe(df_coefs, use_container_width=True, hide_index=True)                  
+            intercept = model.intercept_
+
+            # Si régression logistique multinomiale
+            if model.coef_.ndim > 1:
+                # Ici, tu veux afficher les coefficients pour chaque classe
+                for i, coefs in enumerate(model.coef_):
+                    df_coefs = pd.DataFrame({
+                        'Variable': X_train.columns,
+                        'Coefficient': coefs
+                    }).sort_values(by='Coefficient', key=abs, ascending=False)
+                    df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+                    
+                    # Ajout de la constante pour chaque classe
+                    df_intercept = pd.DataFrame({
+                        'Variable': ['Intercept'],
+                        'Coefficient': [intercept[i] if np.isscalar(intercept) else intercept[i]]
+                    })
+                    df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+
+                    # Affichage des coefficients pour chaque classe
+                    st.subheader(f"Coefficients – Régression Logistique (Classe {i})")
+                    st.dataframe(df_coefs, use_container_width=True, hide_index=True)
+            else:
+                coefs = model.coef_[0]
+                df_coefs = pd.DataFrame({
+                    'Variable': X_train.columns,
+                    'Coefficient': coefs
+                }).sort_values(by='Coefficient', key=abs, ascending=False)
+                df_coefs['Coefficient'] = df_coefs['Coefficient'].round(3)
+
+                # Ajout de l'intercept
+                df_intercept = pd.DataFrame({
+                    'Variable': ['Intercept'],
+                    'Coefficient': [intercept if np.isscalar(intercept) else intercept[0]]
+                })
+                df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+
+                # Affichage
+                st.subheader(f"Coefficients – Régression Logistique")
+                st.dataframe(df_coefs, use_container_width=True, hide_index=True)
+                 
     
     # Calculer les odds-ratios pour la régression logistique
     for idx, best_model in df_score['Best Model'].items():
@@ -1724,10 +1767,11 @@ if valid_mod:
             df_odds['Odds Ratio'] = df_odds['Odds Ratio'].round(2)
             st.dataframe(df_odds)
     
-    # Afficher SHAPE
+    # Afficher SHAPE et LIME
     st.subheader("Interprétation globale ou locale des modèles")       
     for idx, best_model in df_score['Best Model'].items():
         model = instance_model(idx, df_train2, task)
+        model.fit(X_train, y_train)
 
         try:
             # SHAP - modèles linéaires
