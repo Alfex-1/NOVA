@@ -13,3 +13,4 @@ streamlit
 mlflow
 joblib
 shap
+lime
