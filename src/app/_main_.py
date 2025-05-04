@@ -506,6 +506,13 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
     # Les autres
     other_features = [f for f in prop_nan.index if f not in low_corr_features and prop_nan.loc[f, 'NaN proportion'] > 0]
 
+    # Retirer la target si elle est dans les listes
+    if 'target' in locals() and target:
+        if target in low_corr_features:
+            low_corr_features.remove(target)
+        if target in other_features:
+            other_features.remove(target)
+    
     # --- Imputation paramétrique ---
     if low_corr_features:
         parametric_imputer = MultiParametricImputer()
