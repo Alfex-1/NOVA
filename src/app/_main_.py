@@ -1377,7 +1377,7 @@ if valid_wrang:
         len_after_nan_target_train = len(df_train)
         len_diff_nan_target_train = len_before_nan_target_train - len_after_nan_target_train
         
-        if target in df.columns:
+        if target in df_test.columns:
             len_before_nan_target_test = len(df_test)
             df_test = df_test.dropna(subset=[target])
             len_after_nan_target_test = len(df_test)
