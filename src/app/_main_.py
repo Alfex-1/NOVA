@@ -552,11 +552,11 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
     # Vérification qu'elles sont bien numériques
     low_corr_features = [
         feature for feature in low_corr_features
-        if 'float' in prop_nan.loc[feature, 'Type'] or 'int' in prop_nan.loc[feature, 'Type']
+        if ('float' in prop_nan.loc[feature, 'Type'] or 'int' in prop_nan.loc[feature, 'Type']) and prop_nan.loc[feature, 'NaN'] > 0
     ]
 
     # Les autres
-    other_features = [f for f in prop_nan.index if f not in low_corr_features]
+    other_features = [f for f in prop_nan.index if f not in low_corr_features and prop_nan.loc[f, 'NaN'] > 0]
 
     # --- Imputation paramétrique ---
     if low_corr_features:
