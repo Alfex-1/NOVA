@@ -1115,14 +1115,12 @@ if df is not None:
         st.sidebar.title("Paramètres de Modélisation")
 
         # Définition de la variable cible
-        if df_test is None:
-            target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
+        target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
         
+        if df_test is None:
             # Division des données (si non déjà fait)
             train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
             train_size=train_size/100
-        else:
-            target = st.sidebar.selectbox("Choisissez la variable cible", df_train.columns.to_list())
  
         st.sidebar.subheader("Choix des modèles")
 
@@ -1602,8 +1600,8 @@ if valid_mod:
         y = df[target]
         X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size, shuffle=True)
     else:
-        X_train = df_train.drop(columns=target)
-        y_train = df_train[target]
+        X_train = df.drop(columns=target)
+        y_train = df[target]
         X_test = df_test.drop(columns=target)
         y_test = df_test[target]
 
