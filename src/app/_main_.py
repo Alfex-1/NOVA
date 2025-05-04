@@ -239,66 +239,64 @@ def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: 
         df.index = range(len(df))
             
     return df
-class ParametricImputer:
-    def __init__(self, distribution='norm', random_state=None):
-        self.distribution = distribution
-        self.random_state = random_state
-        self.fitted = False
-        self.params = {}
+# class ParametricImputer:
+#     def __init__(self, distribution='norm', random_state=None):
+#         self.distribution = distribution
+#         self.random_state = random_state
+#         self.fitted = False
+#         self.params = {}
 
-    def fit(self, series):
-        if not isinstance(series, pd.Series):
-            raise ValueError("L'entrée doit être une série pandas.")
-        data = series.dropna()
-        if self.distribution == 'norm':
-            mu, sigma = stats.norm.fit(data)
-            self.params = {'mu': mu, 'sigma': sigma}
-            self.fitted = True
-        else:
-            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+#     def fit(self, series):
+#         if not isinstance(series, pd.Series):
+#             raise ValueError("L'entrée doit être une série pandas.")
+#         data = series.dropna()
+#         if self.distribution == 'norm':
+#             mu, sigma = stats.norm.fit(data)
+#             self.params = {'mu': mu, 'sigma': sigma}
+#             self.fitted = True
+#         else:
+#             raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
 
-    def sample(self, size):
-        if not self.fitted:
-            raise RuntimeError("Le fit doit être exécuté avant le sampling.")
-        if self.distribution == 'norm':
-            return stats.norm.rvs(loc=self.params['mu'], scale=self.params['sigma'], size=size)
-        else:
-            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+#     def sample(self, size):
+#         if not self.fitted:
+#             raise RuntimeError("Le fit doit être exécuté avant le sampling.")
+#         if self.distribution == 'norm':
+#             return stats.norm.rvs(loc=self.params['mu'], scale=self.params['sigma'], size=size)
+#         else:
+#             raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
 
-    def transform(self, series):
-        if not self.fitted:
-            raise RuntimeError("Impossible de transformer avant le fit.")
-        missing = series.isnull()
-        n_missing = missing.sum()
-        if n_missing == 0:
-            return series
-        sampled_values = self.sample(n_missing)
-        series_copy = series.copy()
-        series_copy.loc[missing] = sampled_values
-        return series_copy
+#     def transform(self, series):
+#         if not self.fitted:
+#             raise RuntimeError("Impossible de transformer avant le fit.")
+#         missing = series.isnull()
+#         n_missing = missing.sum()
+#         if n_missing == 0:
+#             return series
+#         sampled_values = self.sample(n_missing)
+#         series_copy = series.copy()
+#         series_copy.loc[missing] = sampled_values
+#         return series_copy
 
-class MultiParametricImputer:
-    def __init__(self, distribution='norm'):
-        self.distribution = distribution
-        self.imputers = {}
-        self.fitted = False
+# class MultiParametricImputer:
+#     def __init__(self, distribution='norm'):
+#         self.distribution = distribution
+#         self.imputers = {}
+#         self.fitted = False
 
-    def fit(self, df, columns):
-        for col in columns:
-            imputer = ParametricImputer(self.distribution)
-            imputer.fit(df[col])
-            self.imputers[col] = imputer
-        self.fitted = True
+#     def fit(self, df, columns):
+#         for col in columns:
+#             imputer = ParametricImputer(self.distribution)
+#             imputer.fit(df[col])
+#             self.imputers[col] = imputer
+#         self.fitted = True
 
-    def transform(self, df):
-        if not self.fitted:
-            raise RuntimeError("Tu dois fitter avant de transformer.")
-        df_copy = df.copy()
-        for col, imputer in self.imputers.items():
-            df_copy[col] = imputer.transform(df_copy[col])
-        return df_copy
-    
-    
+#     def transform(self, df):
+#         if not self.fitted:
+#             raise RuntimeError("Tu dois fitter avant de transformer.")
+#         df_copy = df.copy()
+#         for col, imputer in self.imputers.items():
+#             df_copy[col] = imputer.transform(df_copy[col])
+#         return df_copy
     
 class ParametricImputer:
     def __init__(self, random_state=42):
@@ -378,8 +376,7 @@ class ParametricImputer:
             series.loc[missing] = sampled_values
         return series
 
-
-class MultiParametricImputer(distribution='lognorm'):
+class MultiParametricImputer:
     def __init__(self, distribution='lognorm', random_state=42):
         self.distribution = distribution
         self.random_state = random_state
