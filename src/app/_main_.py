@@ -974,14 +974,13 @@ if df is not None:
         # Demander la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
         
-        # Demander s'il faut demander de diviser la base
-        split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
-        
-        if split_data:
-            train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
-            train_size = train_size/100
-            # Division
-            df_train, df_test = train_test_split(df, train_size=train_size, shuffle=True, random_state=42)
+        if df_test is None:
+            # Demander s'il faut demander de diviser la base
+            split_data = st.sidebar.checkbox("Diviser la base de données en apprentissage/validation ?", value=True, help="La division des données durant leur traitement est fondamentale pour éviter la fuite de données lors de votre modélisation.")
+            
+            if split_data:
+                train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
+                train_size = train_size/100
         
         # Demander si l'utilisateur souhaite supprimer les doublons
         drop_dupli = st.sidebar.checkbox("Supprimer toutes les observations dupliquées", value=False)
