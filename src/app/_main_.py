@@ -1214,7 +1214,10 @@ if df is not None:
 
 if valid_wrang:
     # Faire les traitements selon si split_data = True
-    if globals().get("df_test", False) or globals().get("split_data", False):   
+    df_test_exists = 'df_test' in globals() and df_test is not None and not df_test.empty
+    split_data_val = globals().get('split_data', False)
+
+    if df_test_exists or split_data_val:   
         # Suppression des doublons
         if drop_dupli:
             len_before_dupli =len(df_train)
