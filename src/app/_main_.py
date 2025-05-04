@@ -1495,7 +1495,8 @@ if valid_wrang:
             with st.expander("Rapport du preprocessing", expanded=False):
                 st.write("**Nombre de doublons traités :**", len_diff)
                 st.write("**Nombre d'observations supprimées car la variable cible est manquante (train) :**", len_diff_nan_target_train)
-                st.write("**Nombre d'observations supprimées car la variable cible est manquante (test) :**", len_diff_nan_target_test)
+                if df_test is not None and target in df_test.columns:
+                    st.write("**Nombre d'observations supprimées car la variable cible est manquante (test) :**", len_diff_nan_target_test)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
 
                 st.write("**Résumé des méthodes d'imputation utilisées :**")
