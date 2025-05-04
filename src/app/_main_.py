@@ -1450,7 +1450,7 @@ if valid_wrang:
             df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_imputed, scores_supervised, imputation_report = impute_missing_values(nb_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
     
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
