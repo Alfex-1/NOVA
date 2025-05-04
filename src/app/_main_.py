@@ -1117,9 +1117,10 @@ if df is not None:
         # Définition de la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible", df.columns.to_list())
         
-        # Division des données
-        train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
-        train_size=train_size/100
+        # Division des données (si non déjà fait)
+        if df_test is None:
+            train_size = st.sidebar.slider("Proportion des données utilisées pour l'apprentissage des modèles (en %)", min_value=50, max_value=90, value=75)
+            train_size=train_size/100
         
         st.sidebar.subheader("Choix des modèles")
 
@@ -1594,9 +1595,15 @@ if valid_mod:
     # Effectuer la modélisation
 
     # Division des données
-    X = df.drop(columns=target)
-    y = df[target]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size, shuffle=True)
+    if df_test is None:
+        X = df.drop(columns=target)
+        y = df[target]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size, shuffle=True)
+    else:
+        X_train = df_train.drop(columns=target)
+        y_train = df_train[target]
+        X_test = df_test.drop(columns=target)
+        y_test = df_test[target]
 
     if use_loocv:
         cv = X_train.shape[0]
@@ -1791,7 +1798,7 @@ if valid_mod:
                 explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
                 html = explanation.as_html()
                 html = html.replace("<body>", '<body style="background-color:white; color:black;">')
-                components.html(html, height=450, scrolling=True)
+                components.html(html, height=375, scrolling=True)
 
             # SHAP - arbres (RandomForest, XGBoost, LightGBM)
             else:
