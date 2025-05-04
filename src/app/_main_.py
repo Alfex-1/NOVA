@@ -931,6 +931,7 @@ st.write(
 # Initialisation des variables
 df_train = None
 df_test = None
+df = None
 uploaded_file_train = st.file_uploader("Choisissez un fichier d'entraînement (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="train")
 uploaded_file_test = st.file_uploader("Choisissez un fichier de validation (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="test")
 wrang = st.checkbox("La base de données nécessite un traitement")
@@ -955,9 +956,8 @@ if uploaded_file_test is not None:
     else:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 else:
-    df = df_train
+    df = df_train.copy()
     del df_train
-    df_test = None
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
