@@ -504,7 +504,7 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
 
     return df_train, df_test, scores_df
 
-def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, cv=5, target=None):
+def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None, cv=5):
     """
     Imputation avancée des valeurs manquantes :
     - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
@@ -531,13 +531,16 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
     imputation_report = []
 
     # --- Retirer la variable cible des bases de données ---
-    if target:
-        try:
-            df_train = df_train.drop(columns=[target])
-            if df_test is not None:
-                df_test = df_test.drop(columns=[target])
-        except KeyError:
-            print(f"Attention : La variable cible '{target}' n'existe pas dans le DataFrame.")
+    if target in df_train.columns:
+        val_target_train = df_train[target].copy()
+        df_train = df_train.drop(columns=[target])
+    
+    if df_test is not None:
+        if target in df_test.columns:
+            val_target_test = df_test[target].copy()
+            df_test = df_test.drop(columns=[target])
+        else: 
+            val_target_test = None
 
     # --- Sélection des variables peu corrélées ---
     low_corr_features = []
@@ -617,12 +620,9 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
 
     # --- Ajouter la variable cible de retour si nécessaire ---
     if target:
-        try:
-            df_train[target] = df_train[target]  # Re-ajouter la cible après l'imputation
-            if df_test is not None:
-                df_test[target] = df_test[target]  # Re-ajouter la cible dans df_test
-        except KeyError:
-            pass  # La variable cible n'existe pas, ne rien faire
+        df_train[target] = val_target_train
+        if df_test is not None and val_target_test is not None:
+            df_test[target] = val_target_test
 
     # Conversion du rapport en DataFrame
     imputation_report = pd.DataFrame(imputation_report)
