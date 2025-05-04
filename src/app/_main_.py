@@ -1220,16 +1220,16 @@ if valid_wrang:
     if df_test_exists or split_data_val:   
         # Suppression des doublons
         if drop_dupli:
-            len_before_dupli =len(df_train)
-            df_train = df_train.drop_duplicates()
-            len_after_dupli =len(df_train)
+            len_before_dupli =len(df)
+            df = df.drop_duplicates()
+            len_after_dupli =len(df)
             len_diff = len_before_dupli - len_after_dupli
         else:
             len_diff = "Les doublons n'ont pas été traités."       
         
         # Etude des valeurs manquantes
-        len_before_nan_target = len(df_train)
-        df_train = df_train.dropna(subset=[target])
+        len_before_nan_target = len(df)
+        df_train = df.dropna(subset=[target])
         len_after_nan_target = len(df_train)
         len_diff_nan_target = len_before_nan_target - len_after_nan_target
             
