@@ -1123,7 +1123,7 @@ if df is not None:
             train_size=train_size/100
         else:
             target = st.sidebar.selectbox("Choisissez la variable cible", df_train.columns.to_list())
-        
+ 
         st.sidebar.subheader("Choix des modèles")
 
         # Sélection de la tâche (Classification ou Régression)
