@@ -24,80 +24,141 @@ from sklearn.metrics import confusion_matrix, get_scorer
 import lightgbm as lgb
 from joblib import Parallel, delayed
 
-def correlation_missing_values(df: pd.DataFrame):
+def correlation_missing_values(df_train: pd.DataFrame, df_test: pd.DataFrame = None):
     """
-    Analyse la corrélation entre les valeurs manquantes dans un DataFrame.
+    Analyse la corrélation entre les valeurs manquantes dans deux DataFrames (train et test).
 
     Cette fonction identifie les colonnes contenant des valeurs manquantes, 
-    calcule la proportion de NaN par colonne et retourne la matrice de corrélation 
-    des valeurs manquantes.
+    calcule la proportion de NaN par colonne et retourne les matrices de corrélation 
+    des valeurs manquantes pour les bases d'entraînement, de test et la base combinée.
 
     Args:
-        df (pd.DataFrame): Le DataFrame à analyser.
+        df_train (pd.DataFrame): Le DataFrame d'entraînement
+        df_test (pd.DataFrame, optional): Le DataFrame de test (par défaut None)
 
     Returns:
         tuple: 
-            - pd.DataFrame : Matrice de corrélation (%) des valeurs manquantes entre les colonnes.
-            - pd.DataFrame : Proportion des valeurs manquantes par colonne avec le type de variable.
+            - cor_mat_train : Matrice de corrélation des valeurs manquantes pour df_train
+            - cor_mat_test : Matrice de corrélation des valeurs manquantes pour df_test
+            - cor_mat_combined : Matrice de corrélation des valeurs manquantes pour df_combined (train + test)
+            - prop_nan_train : Proportion des valeurs manquantes pour df_train
+            - prop_nan_test : Proportion des valeurs manquantes pour df_test
+            - prop_nan_combined : Proportion des valeurs manquantes pour df_combined (train + test)
     """
-    # Filtrer les colonnes avec des valeurs manquantes
-    df_missing = df.iloc[:, [i for i, n in enumerate(np.var(df.isnull(), axis=0)) if n > 0]]
     
-    # Calculer la proportion de valeurs manquantes et ajouter le type de variable
-    prop_nan = pd.DataFrame({
-        "NaN proportion": round(df.isnull().sum() / len(df) * 100,2),
-        "Type": df.dtypes.astype(str)
-    })
+    def compute_missing_info(df):
+        # Filtrer les colonnes avec des valeurs manquantes
+        df_missing = df.iloc[:, [i for i, n in enumerate(np.var(df.isnull(), axis=0)) if n > 0]]
+        
+        # Calculer la proportion de valeurs manquantes et ajouter le type de variable
+        prop_nan = pd.DataFrame({
+            "NaN proportion": round(df.isnull().sum() / len(df) * 100, 2),
+            "Type": df.dtypes.astype(str)
+        })
 
-    # Calculer la matrice de corrélation des valeurs manquantes
-    corr_mat = round(df_missing.isnull().corr() * 100, 2)
+        # Calculer la matrice de corrélation des valeurs manquantes
+        corr_mat = round(df_missing.isnull().corr() * 100, 2)
 
-    return corr_mat, prop_nan
+        return corr_mat, prop_nan
 
-def encode_data(df: pd.DataFrame,
-                list_binary: list[str] = None,
-                list_ordinal: list[str] = None,
-                list_nominal: list[str] = None,
-                ordinal_mapping: dict[str, dict[str, int]] = None) -> pd.DataFrame:
+    # Calculs pour df_train
+    cor_mat_train, prop_nan_train = compute_missing_info(df_train)
+
+    # Si df_test existe, calculer aussi pour df_test
+    if df_test is not None:
+        cor_mat_test, prop_nan_test = compute_missing_info(df_test)
+        
+        # Calcul pour la base combinée (train + test)
+        df_combined = pd.concat([df_train, df_test], axis=0)
+        cor_mat_combined, prop_nan_combined = compute_missing_info(df_combined)
+    else:
+        cor_mat_test, prop_nan_test, cor_mat_combined, prop_nan_combined = None, None, cor_mat_train, prop_nan_train
+
+    # Retourner les résultats sous forme de variables séparées
+    return cor_mat_train, cor_mat_test, cor_mat_combined, prop_nan_train, prop_nan_test, prop_nan_combined
+
+def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """
     Encode les variables catégorielles du DataFrame selon leur nature.
-    - Binaire : OneHotEncoder avec drop='if_binary' (une seule variable conservée)
-    - Ordinale : mapping dict ou OrdinalEncoder
+    - Binaire : OneHotEncoder avec drop='if_binary' (garde une seule colonne si possible)
+    - Ordinale : Mapping manuel ou OrdinalEncoder
     - Nominale : OneHotEncoder classique (toutes les modalités)
-    
-    Returns:
-        DataFrame encodé
-    """
-    df = df.copy()
 
-    # Binaire
+    Args:
+        df_train: DataFrame d'entraînement
+        df_test: DataFrame de test (optionnel)
+        list_binary: liste des variables binaires
+        list_ordinal: liste des variables ordinales
+        list_nominal: liste des variables nominales
+        ordinal_mapping: dictionnaire pour mapping ordinal (optionnel)
+
+    Returns:
+        df_train_encoded, df_test_encoded (ou None si df_test n'est pas fourni)
+    """
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
+
+    # --- Binaire
     if list_binary:
         encoder = OneHotEncoder(drop='if_binary', sparse_output=False)
-        encoded_array = encoder.fit_transform(df[list_binary])
-        encoded_cols = encoder.get_feature_names_out(list_binary)
-        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
-        df.drop(columns=list_binary, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        encoder.fit(df_train[list_binary])
 
-    # Ordinal
+        encoded_train = pd.DataFrame(
+            encoder.transform(df_train[list_binary]),
+            columns=encoder.get_feature_names_out(list_binary),
+            index=df_train.index
+        )
+
+        df_train.drop(columns=list_binary, inplace=True)
+        df_train = pd.concat([df_train, encoded_train], axis=1)
+
+        if df_test is not None:
+            encoded_test = pd.DataFrame(
+                encoder.transform(df_test[list_binary]),
+                columns=encoder.get_feature_names_out(list_binary),
+                index=df_test.index
+            )
+            df_test.drop(columns=list_binary, inplace=True)
+            df_test = pd.concat([df_test, encoded_test], axis=1)
+
+    # --- Ordinal
     if list_ordinal:
         for col in list_ordinal:
             if ordinal_mapping and col in ordinal_mapping:
-                df[col] = df[col].map(ordinal_mapping[col])
+                df_train[col] = df_train[col].map(ordinal_mapping[col])
+                if df_test is not None:
+                    df_test[col] = df_test[col].map(ordinal_mapping[col])
             else:
                 encoder = OrdinalEncoder()
-                df[col] = encoder.fit_transform(df[[col]])
+                encoder.fit(df_train[[col]])
+                df_train[col] = encoder.transform(df_train[[col]])
+                if df_test is not None:
+                    df_test[col] = encoder.transform(df_test[[col]])
 
-    # Nominal
+    # --- Nominal
     if list_nominal:
         encoder = OneHotEncoder(drop=None, sparse_output=False)
-        encoded_array = encoder.fit_transform(df[list_nominal])
-        encoded_cols = encoder.get_feature_names_out(list_nominal)
-        encoded_df = pd.DataFrame(encoded_array, columns=encoded_cols, index=df.index)
-        df.drop(columns=list_nominal, inplace=True)
-        df = pd.concat([df, encoded_df], axis=1)
+        encoder.fit(df_train[list_nominal])
 
-    return df
+        encoded_train = pd.DataFrame(
+            encoder.transform(df_train[list_nominal]),
+            columns=encoder.get_feature_names_out(list_nominal),
+            index=df_train.index
+        )
+
+        df_train.drop(columns=list_nominal, inplace=True)
+        df_train = pd.concat([df_train, encoded_train], axis=1)
+
+        if df_test is not None:
+            encoded_test = pd.DataFrame(
+                encoder.transform(df_test[list_nominal]),
+                columns=encoder.get_feature_names_out(list_nominal),
+                index=df_test.index
+            )
+            df_test.drop(columns=list_nominal, inplace=True)
+            df_test = pd.concat([df_test, encoded_test], axis=1)
+
+    return df_train, df_test if df_test is not None else df_train
 
 def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
     """
@@ -151,87 +212,336 @@ def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: 
             
     return df
 
-def impute_missing_values(df: pd.DataFrame, corr_info: pd.DataFrame, prop_nan: pd.DataFrame):
-    """
-    Impute les valeurs manquantes dans un DataFrame en fonction des proportions et des corrélations.
+class ParametricImputer:
+    def __init__(self, random_state=42):
+        self.random_state = random_state
+        self.fitted = False
+        self.params = {}
+        self.distribution = None
 
-    Cette fonction impute automatiquement les valeurs manquantes pour chaque variable du DataFrame
-    en analysant la proportion de valeurs manquantes et la force moyenne de corrélation (en valeur absolue)
-    entre les variables. Selon ces indicateurs, différentes stratégies d'imputation sont appliquées :
-      - Pour les variables avec moins de 10% de valeurs manquantes :
-          • Si la force de corrélation est très faible (< 2), on utilise SimpleImputer avec la stratégie
-            'most_frequent' pour les variables de type 'object' ou 'median' pour les variables numériques.
-          • Si la force de corrélation est modérée (entre 2 et 5), on applique KNNImputer.
-          • Si la force de corrélation est élevée (entre 5 et 7), on utilise IterativeImputer avec des paramètres par défaut.
-          • Si la force de corrélation est très élevée (≥ 7), on emploie IterativeImputer avec un RandomForestRegressor comme estimateur.
-      - Pour les variables dont la proportion de valeurs manquantes est comprise entre 10% et 65%, des stratégies similaires
-        sont utilisées avec des paramètres ajustés.
-      - Les variables ayant plus de 65% de valeurs manquantes sont supprimées du DataFrame.
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.Series):
+            raise ValueError("L'entrée doit être une série pandas.")
+        data = X.dropna()
+
+        # Fit normal
+        mu, sigma = stats.norm.fit(data)
+        _, p_norm = stats.kstest(data, 'norm', args=(mu, sigma))
+
+        # Fit uniforme
+        a, b = np.min(data), np.max(data)
+        _, p_unif = stats.kstest(data, 'uniform', args=(a, b - a))
+
+        # Fit exponentielle
+        lambda_hat = 1 / data.mean()  # paramètre de la loi exponentielle
+        _, p_exp = stats.kstest(data, 'expon', args=(0, lambda_hat))
+
+        # Fit log-normale
+        log_data = np.log(data)
+        mu_log, sigma_log = stats.norm.fit(log_data)
+        _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+
+        # Choix : distribution avec le plus grand p-value
+        p_values = {
+            'norm': p_norm,
+            'uniform': p_unif,
+            'expon': p_exp,
+            'lognorm': p_lognorm
+        }
+
+        best_dist = max(p_values, key=p_values.get)  # On choisit la distribution avec la plus grande p-value
+
+        if best_dist == 'norm':
+            self.distribution = 'norm'
+            self.params = {'mu': mu, 'sigma': sigma}
+        elif best_dist == 'uniform':
+            self.distribution = 'uniform'
+            self.params = {'a': a, 'b': b}
+        elif best_dist == 'expon':
+            self.distribution = 'expon'
+            self.params = {'lambda': lambda_hat}
+        else:  # log-normale
+            self.distribution = 'lognorm'
+            self.params = {'mu': mu_log, 'sigma': sigma_log}
+
+        self.fitted = True
+        return self
+
+    def sample(self, size):
+        if not self.fitted:
+            raise RuntimeError("Le fit doit être exécuté avant le sampling.")
+        rng = np.random.default_rng(self.random_state)
+
+        if self.distribution == 'norm':
+            return rng.normal(loc=self.params['mu'], scale=self.params['sigma'], size=size)
+        elif self.distribution == 'uniform':
+            return rng.uniform(low=self.params['a'], high=self.params['b'], size=size)
+        else:
+            raise RuntimeError("Distribution non reconnue.")
+
+    def transform(self, X):
+        if not self.fitted:
+            raise RuntimeError("Impossible de transformer avant le fit.")
+        series = X.copy()
+        missing = series.isnull()
+        n_missing = missing.sum()
+        if n_missing > 0:
+            sampled_values = self.sample(n_missing)
+            series.loc[missing] = sampled_values
+        return series
+
+class MultiParametricImputer:
+    def __init__(self, distribution='lognorm', random_state=42):
+        self.distribution = distribution
+        self.random_state = random_state
+        self.imputers = {}
+        self.fitted = False
+        self.imputed_info = {}
+
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("L'entrée doit être un DataFrame pandas.")
+        for col in X.columns:
+            imputer = ParametricImputer(distribution=self.distribution, random_state=self.random_state)
+            imputer.fit(X[col])
+            self.imputers[col] = imputer
+            self.imputed_info[col] = {
+                'params': imputer.params,
+                'distribution': imputer.distribution,
+                'n_missing_train': X[col].isna().sum()
+            }
+        self.fitted = True
+        return self
+
+    def transform(self, X):
+        if not self.fitted:
+            raise RuntimeError("Tu dois fitter avant de transformer.")
+        df_copy = X.copy()
+        for col, imputer in self.imputers.items():
+            if col in df_copy.columns:
+                df_copy[col] = imputer.transform(df_copy[col])
+        return df_copy
+    
+def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
+    """
+    Impute les valeurs manquantes des colonnes sélectionnées en utilisant des modèles supervisés (arbres de décision).
+
+    Pour chaque colonne cible, entraîne un arbre de décision (classifieur pour les variables catégorielles, régressseur pour les variables continues)
+    sur les données connues, puis impute les valeurs manquantes dans les ensembles d'entraînement et de test.
 
     Args:
-        df (pd.DataFrame): Le DataFrame d'entrée contenant des valeurs manquantes.
-        corr_info (pd.DataFrame): Une matrice de corrélation des patterns de valeurs manquantes (exprimée en pourcentage),
-                                  telle que générée par une fonction comme `correlation_missing_values`.
-        prop_nan (pd.DataFrame): Un DataFrame indiquant le pourcentage de valeurs manquantes et le type de données pour chaque variable,
-                                 généralement obtenu via `correlation_missing_values`.
+        df_train (pd.DataFrame): Jeu de données d'entraînement contenant des valeurs manquantes.
+        df_test (pd.DataFrame ou None): Jeu de données de test contenant des valeurs manquantes. Peut être None si indisponible.
+        cols_to_impute (list of str): Liste des noms de colonnes à imputer.
+        cv (int, optionnel): Nombre de plis pour la validation croisée utilisée pour évaluer la performance des modèles. Par défaut à 5.
 
     Returns:
-        pd.DataFrame: Un nouveau DataFrame avec les valeurs manquantes imputées selon les stratégies définies.
-    """   
-    df_imputed = df.copy()
+        pd.DataFrame: Jeu de données d'entraînement mis à jour avec les imputations.
+        pd.DataFrame ou None: Jeu de données de test mis à jour avec les imputations (ou None si non fourni).
+        pd.DataFrame: DataFrame contenant les scores de performance pour chaque colonne imputée.
+    """
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
     
-    # Détection automatique des variables à imputer
-    variables_a_imputer = prop_nan[prop_nan["NaN proportion"] > 0].index.tolist()
+    scores = []
 
-    for var in variables_a_imputer:
-        taux_nan = prop_nan.loc[var, "NaN proportion"]
-        type_ = prop_nan.loc[var, "Type"]
-        corr_strength = corr_info[var].abs().mean()  # Moyenne des corrélations absolues avec les autres variables
-        
-        # Paramètres pour IterativeImputer
-        max_iter, tol = 500, 1e-3
+    for target_col in cols_to_impute:
+        target_is_categorical = df_train[target_col].dtype == 'object' or str(df_train[target_col].dtype) == 'category'
 
-        if taux_nan < 10:
-            if corr_strength < 2:
-                if type_ == 'object':
-                    imputer = SimpleImputer(strategy='most_frequent')
-                else:
-                    imputer = SimpleImputer(strategy='median')
-            
-            elif corr_strength < 5 and corr_strength >= 2:
-                imputer = KNNImputer(n_neighbors=4, weights='distance')
-            
-            elif corr_strength < 7 and corr_strength >= 5:
-                imputer = IterativeImputer(max_iter=max_iter, tol=tol, random_state=42)
-            
-            else:
-                estimator = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-            
-            df_imputed[[var]] = imputer.fit_transform(df_imputed[[var]])
-            if type_ == 'object' and taux_nan >= 10 and corr_strength >= 2:
-                    df_imputed[[var]] = df_imputed[[var]].round(0).astype(int)
-        
-        elif taux_nan >= 10 and taux_nan < 65:
-            if corr_strength < 5:
-                imputer = IterativeImputer(max_iter=max_iter, tol=tol, random_state=42)
-            
-            elif corr_strength < 7 and corr_strength >= 5:
-                estimator = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-                    
-            else:
-                estimator = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42, n_jobs=-1)
-                imputer = IterativeImputer(estimator=estimator,max_iter=max_iter, tol=tol, random_state=42)
-            
-            df_imputed[[var]] = imputer.fit_transform(df_imputed[[var]])
-            if type_ == 'object' and taux_nan >= 10 and corr_strength >= 2:
-                        df_imputed[[var]] = df_imputed[[var]].round(0).astype(int)
-        
+        model = DecisionTreeClassifier(criterion='entropy', class_weight='balanced', ccp_alpha=0.01, random_state=42) if target_is_categorical else DecisionTreeRegressor(criterion='squared_error', ccp_alpha=0.01, random_state=42)
+
+        train_known = df_train[df_train[target_col].notna()].copy()
+        train_missing = df_train[df_train[target_col].isna()].copy()
+        test_missing = df_test[df_test[target_col].isna()].copy()
+
+        feature_cols = [col for col in cols_to_impute if col != target_col]
+
+        X_fit = train_known[feature_cols].copy()
+        y_fit = train_known[target_col].copy()
+
+        for col in X_fit.select_dtypes(include='object').columns:
+            le = LabelEncoder()
+            X_fit.loc[:, col] = le.fit_transform(X_fit[col].astype(str))
+
+        if not train_missing.empty:
+            X_missing_train = train_missing[feature_cols].copy()
+            for col in X_missing_train.select_dtypes(include='object').columns:
+                le = LabelEncoder()
+                X_missing_train.loc[:, col] = le.fit_transform(X_missing_train[col].astype(str))
         else:
-            df = df.drop(var, axis=1)        
+            X_missing_train = None
 
-    return df_imputed
+        if not test_missing.empty:
+            X_missing_test = test_missing[feature_cols].copy()
+            for col in X_missing_test.select_dtypes(include='object').columns:
+                le = LabelEncoder()
+                X_missing_test.loc[:, col] = le.fit_transform(X_missing_test[col].astype(str))
+        else:
+            X_missing_test = None
+
+        if target_is_categorical:
+            le_target = LabelEncoder()
+            y_fit = le_target.fit_transform(y_fit.astype(str))
+
+        model.fit(X_fit, y_fit)
+
+        # --- SCORING ---
+        if target_is_categorical:
+            score_array = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='accuracy')
+            score_value = round(np.mean(score_array)*100, 2)
+            metric_used = 'accuracy (%)'
+        else:
+            rmse_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_root_mean_squared_error')
+            score_value = round(np.mean(rmse_scores), 2)
+            metric_used = 'rmse'
+
+        scores.append({
+            'feature': target_col,
+            'metric': metric_used,
+            'score': score_value
+        })
+
+        # --- IMPUTATION ---
+        if X_missing_train is not None:
+            preds_train = model.predict(X_missing_train)
+            if target_is_categorical:
+                preds_train = le_target.inverse_transform(preds_train)
+            df_train.loc[df_train[target_col].isna(), target_col] = preds_train
+
+        if X_missing_test is not None:
+            preds_test = model.predict(X_missing_test)
+            if target_is_categorical:
+                preds_test = le_target.inverse_transform(preds_test)
+            df_test.loc[df_test[target_col].isna(), target_col] = preds_test
+
+    scores_df = pd.DataFrame(scores)
+
+    return df_train, df_test, scores_df
+
+def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None, cv=5):
+    """
+    Imputation avancée des valeurs manquantes :
+    - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
+    - Autres variables => imputation supervisée (arbre de décision)
+
+    Args:
+        df_train (pd.DataFrame): DataFrame d'entraînement
+        df_test (pd.DataFrame, optional): DataFrame de test
+        prop_nan (pd.DataFrame): Table des proportions de NaN et types des variables
+        corr_mat (pd.DataFrame): Matrice de corrélation (%) des patterns de NaN
+        cv (int): Nombre de folds pour la cross-validation de l'imputation supervisée
+        target (str, optional): Nom de la variable cible à exclure pendant l'imputation
+
+    Returns:
+        df_train_imputed, df_test_imputed (ou None), scores_supervised, imputation_report
+    """
+    if prop_nan is None or corr_mat is None:
+        raise ValueError("Les tables prop_nan et corr_mat doivent être fournies toutes les deux.")
+
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
+
+    # --- Initialisation du rapport d'imputation ---
+    imputation_report = []
+
+    # --- Retirer la variable cible des bases de données ---
+    if target in df_train.columns:
+        val_target_train = df_train[target].copy()
+        df_train = df_train.drop(columns=[target])
+    
+    if df_test is not None:
+        if target in df_test.columns:
+            val_target_test = df_test[target].copy()
+            df_test = df_test.drop(columns=[target])
+        else: 
+            val_target_test = None
+
+    # --- Sélection des variables peu corrélées ---
+    low_corr_features = []
+    for feature in corr_mat.columns:
+        # Si la variable a des corrélations faibles (<20%) avec toutes les autres
+        if (corr_mat[feature].drop(labels=[feature]).abs() <= 20).all():
+            low_corr_features.append(feature)
+
+    # Vérification qu'elles sont bien numériques
+    low_corr_features = [
+        feature for feature in low_corr_features
+        if ('float' in prop_nan.loc[feature, 'Type'] or 'int' in prop_nan.loc[feature, 'Type']) and prop_nan.loc[feature, 'NaN proportion'] > 0
+    ]
+
+    # Les autres
+    other_features = [f for f in prop_nan.index if f not in low_corr_features and prop_nan.loc[f, 'NaN proportion'] > 0]
+
+    # --- Imputation paramétrique ---
+    if low_corr_features:
+        parametric_imputer = MultiParametricImputer(distribution='norm')
+        parametric_imputer.fit(df_train[low_corr_features])
+        df_train[low_corr_features] = parametric_imputer.transform(df_train[low_corr_features])
+        if df_test is not None:
+            df_test[low_corr_features] = parametric_imputer.transform(df_test[low_corr_features])
+
+        # Clipping pour éviter les envolées lyriques
+        min_max_dict = {col: (df_train[col].min(), df_train[col].max()) for col in low_corr_features}
+        for col, (min_val, max_val) in min_max_dict.items():
+            df_train[col] = df_train[col].clip(lower=min_val, upper=max_val)
+            if df_test is not None:
+                df_test[col] = df_test[col].clip(lower=min_val, upper=max_val)
+
+        # Ajout au rapport
+        for feature in low_corr_features:
+            imputation_report.append({
+                'feature': feature,
+                'method': 'Parametric Imputation',
+                'distribution': parametric_imputer.imputers[feature].distribution,
+                'params': parametric_imputer.imputers[feature].params,
+                'base': 'train'
+            })
+        if df_test is not None:
+            for feature in low_corr_features:
+                imputation_report.append({
+                    'feature': feature,
+                    'method': 'Parametric Imputation',
+                    'distribution': parametric_imputer.imputers[feature].distribution,
+                    'params': parametric_imputer.imputers[feature].params,
+                    'base': 'test'
+                })
+
+    # --- Imputation supervisée ---
+    if other_features:
+        df_train, df_test, scores_supervised = impute_from_supervised(
+            df_train, df_test, other_features, cv=cv
+        )
+        if df_test is not None and (df_test is df_train):
+            df_test = None
+
+        # Ajout au rapport pour les variables imputation supervisée
+        for feature in other_features:
+            imputation_report.append({
+                'feature': feature,
+                'method': 'Supervised Imputation (Decision Tree)',
+                'base': 'train'
+            })
+        if df_test is not None:
+            for feature in other_features:
+                imputation_report.append({
+                    'feature': feature,
+                    'method': 'Supervised Imputation (Decision Tree)',
+                    'base': 'test'
+                })
+
+    else:
+        scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
+
+    # --- Ajouter la variable cible de retour si nécessaire ---
+    if target:
+        df_train[target] = val_target_train
+        if df_test is not None and val_target_test is not None:
+            df_test[target] = val_target_test
+
+    # Conversion du rapport en DataFrame
+    imputation_report = pd.DataFrame(imputation_report)
+
+    return df_train, df_test, scores_supervised, imputation_report
 
 def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
     df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')

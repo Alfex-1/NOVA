@@ -188,57 +188,6 @@ def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binar
 
     return df_train, df_test if df_test is not None else df_train
 
-def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
-    """
-    Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
-
-    - **Binaire** : One-Hot Encoding
-    - **Ordinal** : Encodage en respectant un ordre défini (via un mapping)
-    - **Nominal** : One-Hot Encoding
-
-    Args:
-        df (pd.DataFrame): Le DataFrame contenant les données à encoder.
-        list_binary (list, optional): Liste des colonnes binaires à encoder en One-Hot. Defaults to None.
-        list_ordinal (list, optional): Liste des colonnes ordinales à encoder. Defaults to None.
-        list_nominal (list, optional): Liste des colonnes nominales à encoder en One-Hot. Defaults to None.
-        ordinal_mapping (dict, optional): Dictionnaire contenant le mapping des valeurs ordinales sous la forme 
-            {'colonne': {'valeur1': 0, 'valeur2': 1, ...}}. Defaults to None.
-
-    Returns:
-        pd.DataFrame: Le DataFrame encodé avec les transformations appliquées.
-    """    
-    # Encodage binaire (OneHot) pour les variables binaires
-    if list_binary is not None and len(list_binary) > 0:
-        onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_binary)], 
-                                  remainder='passthrough')
-        df = onehot.fit_transform(df)
-        df = pd.DataFrame(df, columns=onehot.get_feature_names_out(list_binary))
-    
-    # Encodage ordinal pour les variables ordinales
-    if list_ordinal is not None and len(list_ordinal) > 0:
-        for col in list_ordinal:
-            if ordinal_mapping is not None and col in ordinal_mapping:
-                # Appliquer le mapping d'ordinal
-                df[col] = df[col].map(ordinal_mapping[col])
-            else:
-                # Si le mapping n'est pas fourni, utiliser OrdinalEncoder
-                encoder = OrdinalEncoder(categories=[list(ordinal_mapping[col].keys())])
-                df[col] = encoder.fit_transform(df[[col]])
-    
-    # Encodage non-ordinal (OneHot) pour les variables nominales
-    if list_nominal is not None and len(list_nominal) > 0:
-        onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_nominal)], 
-                                remainder='passthrough')
-        df = onehot.fit_transform(df)
-        
-        # Obtenir les nouveaux noms de colonnes et supprimer le préfixe 'onehot__'
-        new_columns = onehot.get_feature_names_out()
-        new_columns = [col.replace('onehot__', '') for col in new_columns]
-        
-        df = pd.DataFrame(df, columns=new_columns)
-        df.index = range(len(df))
-            
-    return df
 # class ParametricImputer:
 #     def __init__(self, distribution='norm', random_state=None):
 #         self.distribution = distribution
@@ -375,10 +324,8 @@ class ParametricImputer:
             sampled_values = self.sample(n_missing)
             series.loc[missing] = sampled_values
         return series
-
 class MultiParametricImputer:
-    def __init__(self, distribution='lognorm', random_state=42):
-        self.distribution = distribution
+    def __init__(self, random_state=42):
         self.random_state = random_state
         self.imputers = {}
         self.fitted = False
@@ -388,7 +335,7 @@ class MultiParametricImputer:
         if not isinstance(X, pd.DataFrame):
             raise ValueError("L'entrée doit être un DataFrame pandas.")
         for col in X.columns:
-            imputer = ParametricImputer(distribution=self.distribution, random_state=self.random_state)
+            imputer = ParametricImputer(random_state=self.random_state)
             imputer.fit(X[col])
             self.imputers[col] = imputer
             self.imputed_info[col] = {
@@ -407,6 +354,7 @@ class MultiParametricImputer:
             if col in df_copy.columns:
                 df_copy[col] = imputer.transform(df_copy[col])
         return df_copy
+
     
 def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
     """
@@ -560,7 +508,7 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
 
     # --- Imputation paramétrique ---
     if low_corr_features:
-        parametric_imputer = MultiParametricImputer(distribution='norm')
+        parametric_imputer = MultiParametricImputer()
         parametric_imputer.fit(df_train[low_corr_features])
         df_train[low_corr_features] = parametric_imputer.transform(df_train[low_corr_features])
         if df_test is not None:
