@@ -971,6 +971,9 @@ if df is not None:
         
         st.sidebar.subheader("Informations générales")
         
+        # Supprimer les colonnes inutiles
+        drop_columns = st.sidebar.multiselect("Quelle(s) variables voulez-vous supprimer instantanément ?", df.columns.to_list(), help="Sélectionnez les colonnes que vous souhaitez supprimer de la base de données.")
+        
         # Demander la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
         
@@ -1213,11 +1216,17 @@ if df is not None:
         valid_mod = st.sidebar.button("Valider les choix de modélisation")
 
 if valid_wrang:
+    
     # Faire les traitements selon si split_data = True
     df_test_exists = 'df_test' in globals() and df_test is not None and not df_test.empty
     split_data_val = globals().get('split_data', False)
 
-    if df_test_exists or split_data_val:   
+    if df_test_exists or split_data_val:
+        # Suppression des colonnes inutiles
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
+            df_test = df_test.drop(columns=drop_columns)
+           
         # Suppression des doublons
         if drop_dupli:
             len_before_dupli =len(df)
@@ -1427,6 +1436,10 @@ if valid_wrang:
                 )            
     
     else:
+        # Suppression des colonnes inutiles
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
+            
         # Suppression des doublons
         if drop_dupli:
             len_before_dupli = len(df)
