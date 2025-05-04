@@ -956,7 +956,7 @@ if uploaded_file_test is not None:
     else:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 else:
-    df = df_train.copy()
+    df = df_train
     del df_train
 
 # Sidebar pour la configuration de l'utilisateur    
