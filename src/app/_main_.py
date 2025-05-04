@@ -1249,7 +1249,7 @@ if df is not None:
                 explained_variance = st.sidebar.slider("Variance expliquée à conserver (%)", min_value=00, max_value=100, value=95)
         
         # Valider les choix
-        valid_wrang = st.sidebar.button("Valider les choix de modélisation")
+        valid_wrang = st.sidebar.button("Valider les choix de traitement")
     
     else:
         # Modélisation
@@ -1377,10 +1377,11 @@ if valid_wrang:
         len_after_nan_target_train = len(df_train)
         len_diff_nan_target_train = len_before_nan_target_train - len_after_nan_target_train
         
-        len_before_nan_target_test = len(df_test)
-        df_test = df_test.dropna(subset=[target])
-        len_after_nan_target_test = len(df_test)
-        len_diff_nan_target_test = len_before_nan_target_test - len_after_nan_target_test
+        if target in df.columns:
+            len_before_nan_target_test = len(df_test)
+            df_test = df_test.dropna(subset=[target])
+            len_after_nan_target_test = len(df_test)
+            len_diff_nan_target_test = len_before_nan_target_test - len_after_nan_target_test
         
             
         corr_mat_train, corr_mat_test, corr_mat, prop_nan_train, prop_nan_test, prop_nan = correlation_missing_values(df_train, df_test)
