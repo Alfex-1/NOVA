@@ -955,9 +955,12 @@ if uploaded_file_test is not None:
         valid_test = True
     else:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
-else:
+
+if df_train is not None and df_test is not None:
     df = df_train
-    del df_train
+    del df_train  # pour éviter toute confusion
+elif df_train is not None and df_test is None:
+    df = df_train
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
