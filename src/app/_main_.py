@@ -957,7 +957,7 @@ if uploaded_file_test is not None:
 else:
     df = df_train
     del df_train
-    del df_test
+    df_test = None
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
