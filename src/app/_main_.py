@@ -240,8 +240,9 @@ def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: 
             
     return df
 class ParametricImputer:
-    def __init__(self, distribution='norm'):
+    def __init__(self, distribution='norm', random_state=None):
         self.distribution = distribution
+        self.random_state = random_state
         self.fitted = False
         self.params = {}
 
@@ -296,6 +297,82 @@ class MultiParametricImputer:
         for col, imputer in self.imputers.items():
             df_copy[col] = imputer.transform(df_copy[col])
         return df_copy
+    
+    
+    
+class ParametricImputer(distribution='norm'):
+    def __init__(self, distribution='norm', random_state=42):
+        self.distribution = distribution
+        self.random_state = random_state
+        self.fitted = False
+        self.params = {}
+
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.Series):
+            raise ValueError("L'entrée doit être une série pandas.")
+        data = X.dropna()
+        if self.distribution == 'norm':
+            mu, sigma = stats.norm.fit(data)
+            self.params = {'mu': mu, 'sigma': sigma}
+            self.fitted = True
+        else:
+            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+        return self
+
+    def sample(self, size):
+        if not self.fitted:
+            raise RuntimeError("Le fit doit être exécuté avant le sampling.")
+        rng = np.random.default_rng(self.random_state)
+        if self.distribution == 'norm':
+            return rng.normal(loc=self.params['mu'], scale=self.params['sigma'], size=size)
+        else:
+            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+
+    def transform(self, X):
+        if not self.fitted:
+            raise RuntimeError("Impossible de transformer avant le fit.")
+        series = X.copy()
+        missing = series.isnull()
+        n_missing = missing.sum()
+        if n_missing > 0:
+            sampled_values = self.sample(n_missing)
+            series.loc[missing] = sampled_values
+        return series
+
+
+class MultiParametricImputer(distribution='norm'):
+    def __init__(self, distribution='norm', random_state=42):
+        self.distribution = distribution
+        self.random_state = random_state
+        self.imputers = {}
+        self.fitted = False
+        self.imputed_info = {}
+
+    def fit(self, X, y=None):
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("L'entrée doit être un DataFrame pandas.")
+        for col in X.columns:
+            imputer = ParametricImputer(distribution=self.distribution, random_state=self.random_state)
+            imputer.fit(X[col])
+            self.imputers[col] = imputer
+            self.imputed_info[col] = {
+                'params': imputer.params,
+                'n_missing_train': X[col].isna().sum()
+            }
+        self.fitted = True
+        return self
+
+    def transform(self, X):
+        if not self.fitted:
+            raise RuntimeError("Tu dois fitter avant de transformer.")
+        df_copy = X.copy()
+        for col, imputer in self.imputers.items():
+            if col in df_copy.columns:
+                df_copy[col] = imputer.transform(df_copy[col])
+        return df_copy    
+    
+    
+
     
 def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
     """
@@ -437,10 +514,10 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
     # --- Imputation paramétrique ---
     if low_corr_features:
         parametric_imputer = MultiParametricImputer(distribution='norm')
-        parametric_imputer.fit(df_train, low_corr_features)
-        df_train = parametric_imputer.transform(df_train)
+        parametric_imputer.fit(df_train[low_corr_features])
+        df_train[low_corr_features] = parametric_imputer.transform(df_train[low_corr_features])
         if df_test is not None:
-            df_test = parametric_imputer.transform(df_test)
+            df_test[low_corr_features] = parametric_imputer.transform(df_test[low_corr_features])
 
         # Clipping pour éviter les envolées lyriques
         min_max_dict = {col: (df_train[col].min(), df_train[col].max()) for col in low_corr_features}
@@ -1237,10 +1314,16 @@ if valid_wrang:
             len_diff = "Les doublons n'ont pas été traités."       
         
         # Etude des valeurs manquantes
-        len_before_nan_target = len(df)
+        len_before_nan_target_train = len(df)
         df_train = df.dropna(subset=[target])
-        len_after_nan_target = len(df_train)
-        len_diff_nan_target = len_before_nan_target - len_after_nan_target
+        len_after_nan_target_train = len(df_train)
+        len_diff_nan_target_train = len_before_nan_target_train - len_after_nan_target_train
+        
+        len_before_nan_target_test = len(df_test)
+        df_test = df_test.dropna(subset=[target])
+        len_after_nan_target_test = len(df_test)
+        len_diff_nan_target_test = len_before_nan_target_test - len_after_nan_target_test
+        
             
         corr_mat_train, corr_mat_test, corr_mat, prop_nan_train, prop_nan_test, prop_nan = correlation_missing_values(df_train, df_test)
         
@@ -1397,7 +1480,8 @@ if valid_wrang:
 
             with st.expander("Rapport du preprocessing", expanded=False):
                 st.write("**Nombre de doublons traités :**", len_diff)
-                st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
+                st.write("**Nombre d'observations supprimées car la variable cible est manquante (train) :**", len_diff_nan_target_train)
+                st.write("**Nombre d'observations supprimées car la variable cible est manquante (test) :**", len_diff_nan_target_test)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
 
                 st.write("**Résumé des méthodes d'imputation utilisées :**")
@@ -1439,7 +1523,6 @@ if valid_wrang:
         # Suppression des colonnes inutiles
         if drop_columns:
             df = df.drop(columns=drop_columns)
-            
         # Suppression des doublons
         if drop_dupli:
             len_before_dupli = len(df)
