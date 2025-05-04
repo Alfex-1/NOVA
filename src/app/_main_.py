@@ -7,7 +7,7 @@ import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
 from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, kstest
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -300,33 +300,72 @@ class MultiParametricImputer:
     
     
     
-class ParametricImputer(distribution='norm'):
-    def __init__(self, distribution='norm', random_state=42):
-        self.distribution = distribution
+class ParametricImputer:
+    def __init__(self, random_state=42):
         self.random_state = random_state
         self.fitted = False
         self.params = {}
+        self.distribution = None
 
     def fit(self, X, y=None):
         if not isinstance(X, pd.Series):
             raise ValueError("L'entrée doit être une série pandas.")
         data = X.dropna()
-        if self.distribution == 'norm':
-            mu, sigma = stats.norm.fit(data)
+
+        # Fit normal
+        mu, sigma = stats.norm.fit(data)
+        _, p_norm = stats.kstest(data, 'norm', args=(mu, sigma))
+
+        # Fit uniforme
+        a, b = np.min(data), np.max(data)
+        _, p_unif = stats.kstest(data, 'uniform', args=(a, b - a))
+
+        # Fit exponentielle
+        lambda_hat = 1 / data.mean()  # paramètre de la loi exponentielle
+        _, p_exp = stats.kstest(data, 'expon', args=(0, lambda_hat))
+
+        # Fit log-normale
+        log_data = np.log(data)
+        mu_log, sigma_log = stats.norm.fit(log_data)
+        _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+
+        # Choix : distribution avec le plus grand p-value
+        p_values = {
+            'norm': p_norm,
+            'uniform': p_unif,
+            'expon': p_exp,
+            'lognorm': p_lognorm
+        }
+
+        best_dist = max(p_values, key=p_values.get)  # On choisit la distribution avec la plus grande p-value
+
+        if best_dist == 'norm':
+            self.distribution = 'norm'
             self.params = {'mu': mu, 'sigma': sigma}
-            self.fitted = True
-        else:
-            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+        elif best_dist == 'uniform':
+            self.distribution = 'uniform'
+            self.params = {'a': a, 'b': b}
+        elif best_dist == 'expon':
+            self.distribution = 'expon'
+            self.params = {'lambda': lambda_hat}
+        else:  # log-normale
+            self.distribution = 'lognorm'
+            self.params = {'mu': mu_log, 'sigma': sigma_log}
+
+        self.fitted = True
         return self
 
     def sample(self, size):
         if not self.fitted:
             raise RuntimeError("Le fit doit être exécuté avant le sampling.")
         rng = np.random.default_rng(self.random_state)
+
         if self.distribution == 'norm':
             return rng.normal(loc=self.params['mu'], scale=self.params['sigma'], size=size)
+        elif self.distribution == 'uniform':
+            return rng.uniform(low=self.params['a'], high=self.params['b'], size=size)
         else:
-            raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
+            raise RuntimeError("Distribution non reconnue.")
 
     def transform(self, X):
         if not self.fitted:
@@ -340,8 +379,8 @@ class ParametricImputer(distribution='norm'):
         return series
 
 
-class MultiParametricImputer(distribution='norm'):
-    def __init__(self, distribution='norm', random_state=42):
+class MultiParametricImputer(distribution='lognorm'):
+    def __init__(self, distribution='lognorm', random_state=42):
         self.distribution = distribution
         self.random_state = random_state
         self.imputers = {}
@@ -357,6 +396,7 @@ class MultiParametricImputer(distribution='norm'):
             self.imputers[col] = imputer
             self.imputed_info[col] = {
                 'params': imputer.params,
+                'distribution': imputer.distribution,
                 'n_missing_train': X[col].isna().sum()
             }
         self.fitted = True
@@ -369,10 +409,7 @@ class MultiParametricImputer(distribution='norm'):
         for col, imputer in self.imputers.items():
             if col in df_copy.columns:
                 df_copy[col] = imputer.transform(df_copy[col])
-        return df_copy    
-    
-    
-
+        return df_copy
     
 def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
     """
@@ -470,7 +507,7 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
 
     return df_train, df_test, scores_df
 
-def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, cv=5):
+def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, cv=5, target=None):
     """
     Imputation avancée des valeurs manquantes :
     - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
@@ -482,6 +519,7 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
         prop_nan (pd.DataFrame): Table des proportions de NaN et types des variables
         corr_mat (pd.DataFrame): Matrice de corrélation (%) des patterns de NaN
         cv (int): Nombre de folds pour la cross-validation de l'imputation supervisée
+        target (str, optional): Nom de la variable cible à exclure pendant l'imputation
 
     Returns:
         df_train_imputed, df_test_imputed (ou None), scores_supervised, imputation_report
@@ -494,6 +532,15 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
 
     # --- Initialisation du rapport d'imputation ---
     imputation_report = []
+
+    # --- Retirer la variable cible des bases de données ---
+    if target:
+        try:
+            df_train = df_train.drop(columns=[target])
+            if df_test is not None:
+                df_test = df_test.drop(columns=[target])
+        except KeyError:
+            print(f"Attention : La variable cible '{target}' n'existe pas dans le DataFrame.")
 
     # --- Sélection des variables peu corrélées ---
     low_corr_features = []
@@ -530,14 +577,18 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
         for feature in low_corr_features:
             imputation_report.append({
                 'feature': feature,
-                'method': 'Parametric Imputation (Normal distribution)',
+                'method': 'Parametric Imputation',
+                'distribution': parametric_imputer.imputers[feature].distribution,
+                'params': parametric_imputer.imputers[feature].params,
                 'base': 'train'
             })
         if df_test is not None:
             for feature in low_corr_features:
                 imputation_report.append({
                     'feature': feature,
-                    'method': 'Parametric Imputation (Normal distribution)',
+                    'method': 'Parametric Imputation',
+                    'distribution': parametric_imputer.imputers[feature].distribution,
+                    'params': parametric_imputer.imputers[feature].params,
                     'base': 'test'
                 })
 
@@ -567,10 +618,20 @@ def impute_missing_values(df_train, df_test=None, prop_nan=None, corr_mat=None, 
     else:
         scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
 
+    # --- Ajouter la variable cible de retour si nécessaire ---
+    if target:
+        try:
+            df_train[target] = df_train[target]  # Re-ajouter la cible après l'imputation
+            if df_test is not None:
+                df_test[target] = df_test[target]  # Re-ajouter la cible dans df_test
+        except KeyError:
+            pass  # La variable cible n'existe pas, ne rien faire
+
     # Conversion du rapport en DataFrame
     imputation_report = pd.DataFrame(imputation_report)
 
     return df_train, df_test, scores_supervised, imputation_report
+
 
 def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, target: str = None, contamination: float = 0.01):
     """
