@@ -7,7 +7,7 @@ import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
 from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
-from scipy.stats import ks_2samp, kstest
+from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -26,12 +26,10 @@ from io import BytesIO
 import os
 import streamlit as st
 from PIL import Image
-from joblib import Parallel, delayed
 import zipfile
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 import streamlit.components.v1 as components
-
 
 def load_file(file_data):
     byte_data = file_data.read()
@@ -186,67 +184,7 @@ def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binar
             df_test.drop(columns=list_nominal, inplace=True)
             df_test = pd.concat([df_test, encoded_test], axis=1)
 
-    return df_train, df_test if df_test is not None else df_train
-
-# class ParametricImputer:
-#     def __init__(self, distribution='norm', random_state=None):
-#         self.distribution = distribution
-#         self.random_state = random_state
-#         self.fitted = False
-#         self.params = {}
-
-#     def fit(self, series):
-#         if not isinstance(series, pd.Series):
-#             raise ValueError("L'entrée doit être une série pandas.")
-#         data = series.dropna()
-#         if self.distribution == 'norm':
-#             mu, sigma = stats.norm.fit(data)
-#             self.params = {'mu': mu, 'sigma': sigma}
-#             self.fitted = True
-#         else:
-#             raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
-
-#     def sample(self, size):
-#         if not self.fitted:
-#             raise RuntimeError("Le fit doit être exécuté avant le sampling.")
-#         if self.distribution == 'norm':
-#             return stats.norm.rvs(loc=self.params['mu'], scale=self.params['sigma'], size=size)
-#         else:
-#             raise NotImplementedError("Seule la loi normale est supportée pour l’instant.")
-
-#     def transform(self, series):
-#         if not self.fitted:
-#             raise RuntimeError("Impossible de transformer avant le fit.")
-#         missing = series.isnull()
-#         n_missing = missing.sum()
-#         if n_missing == 0:
-#             return series
-#         sampled_values = self.sample(n_missing)
-#         series_copy = series.copy()
-#         series_copy.loc[missing] = sampled_values
-#         return series_copy
-
-# class MultiParametricImputer:
-#     def __init__(self, distribution='norm'):
-#         self.distribution = distribution
-#         self.imputers = {}
-#         self.fitted = False
-
-#     def fit(self, df, columns):
-#         for col in columns:
-#             imputer = ParametricImputer(self.distribution)
-#             imputer.fit(df[col])
-#             self.imputers[col] = imputer
-#         self.fitted = True
-
-#     def transform(self, df):
-#         if not self.fitted:
-#             raise RuntimeError("Tu dois fitter avant de transformer.")
-#         df_copy = df.copy()
-#         for col, imputer in self.imputers.items():
-#             df_copy[col] = imputer.transform(df_copy[col])
-#         return df_copy
-    
+    return df_train, df_test if df_test is not None else df_train    
 class ParametricImputer:
     def __init__(self, random_state=42):
         self.random_state = random_state
@@ -1121,10 +1059,10 @@ if df is not None:
         # Obtenir des dataframes distinctes selon les types des données            
         if not use_target:
             df_num = df_copy.select_dtypes(include=['number'])
-            df_cat = df_copy.drop(columns=drop_columns).select_dtypes(exclude=['number']) if drop_columns else df_copy.select_dtypes(exclude=['number'])
+            df_cat = df_copy.drop(columns=drop_columns).select_dtypes(exclude=['number']) if len(drop_columns) > 0 else df_copy.select_dtypes(exclude=['number'])
         else:
             df_num = df.select_dtypes(include=['number'])
-            df_cat = df.drop(columns=drop_columns).select_dtypes(exclude=['number']) if drop_columns else df.select_dtypes(exclude=['number'])
+            df_cat = df.drop(columns=drop_columns).select_dtypes(exclude=['number']) if len(drop_columns) > 0 else df.select_dtypes(exclude=['number'])
         
         # Sélection des variables à encoder
         have_to_encode = False

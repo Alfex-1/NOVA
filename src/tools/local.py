@@ -2,27 +2,48 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
-from sklearn.experimental import enable_iterative_imputer
-from sklearn.impute import KNNImputer, IterativeImputer, SimpleImputer
+import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
-from scipy.stats.mstats import winsorize
 from scipy.stats import ks_2samp
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
-from sklearn.svm import SVC, SVR
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split, cross_validate, learning_curve, KFold
+from sklearn.model_selection import KFold, train_test_split, cross_validate, learning_curve, cross_val_score
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
+import lightgbm as lgb
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import SuccessiveHalvingPruner
 from sklearn.metrics import confusion_matrix, get_scorer
-import lightgbm as lgb
-from joblib import Parallel, delayed
+import io
+from io import BytesIO
+import zipfile
+import shap
+from lime.lime_tabular import LimeTabularExplainer
+
+def load_file(file_data):
+    byte_data = file_data.read()
+    separators = [";", ",", "\t"]
+    detected_sep = None
+
+    for sep in separators:
+        try:
+            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            if tmp_df.shape[1] > 1:
+                detected_sep = sep
+                break
+        except Exception:
+            continue
+
+    if detected_sep is not None:
+        return pd.read_csv(BytesIO(byte_data), sep=detected_sep)
+    else:
+        return None
 
 def correlation_missing_values(df_train: pd.DataFrame, df_test: pd.DataFrame = None):
     """
@@ -158,60 +179,7 @@ def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binar
             df_test.drop(columns=list_nominal, inplace=True)
             df_test = pd.concat([df_test, encoded_test], axis=1)
 
-    return df_train, df_test if df_test is not None else df_train
-
-def encode_data1(df: pd.DataFrame, list_binary: list[str] = None, list_ordinal: list[str]=None, list_nominal: list[str]=None, ordinal_mapping: dict[str, int]=None):
-    """
-    Encode les variables catégorielles d'un DataFrame selon leur nature (binaire, ordinale, nominale).
-
-    - **Binaire** : One-Hot Encoding
-    - **Ordinal** : Encodage en respectant un ordre défini (via un mapping)
-    - **Nominal** : One-Hot Encoding
-
-    Args:
-        df (pd.DataFrame): Le DataFrame contenant les données à encoder.
-        list_binary (list, optional): Liste des colonnes binaires à encoder en One-Hot. Defaults to None.
-        list_ordinal (list, optional): Liste des colonnes ordinales à encoder. Defaults to None.
-        list_nominal (list, optional): Liste des colonnes nominales à encoder en One-Hot. Defaults to None.
-        ordinal_mapping (dict, optional): Dictionnaire contenant le mapping des valeurs ordinales sous la forme 
-            {'colonne': {'valeur1': 0, 'valeur2': 1, ...}}. Defaults to None.
-
-    Returns:
-        pd.DataFrame: Le DataFrame encodé avec les transformations appliquées.
-    """    
-    # Encodage binaire (OneHot) pour les variables binaires
-    if list_binary is not None and len(list_binary) > 0:
-        onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_binary)], 
-                                  remainder='passthrough')
-        df = onehot.fit_transform(df)
-        df = pd.DataFrame(df, columns=onehot.get_feature_names_out(list_binary))
-    
-    # Encodage ordinal pour les variables ordinales
-    if list_ordinal is not None and len(list_ordinal) > 0:
-        for col in list_ordinal:
-            if ordinal_mapping is not None and col in ordinal_mapping:
-                # Appliquer le mapping d'ordinal
-                df[col] = df[col].map(ordinal_mapping[col])
-            else:
-                # Si le mapping n'est pas fourni, utiliser OrdinalEncoder
-                encoder = OrdinalEncoder(categories=[list(ordinal_mapping[col].keys())])
-                df[col] = encoder.fit_transform(df[[col]])
-    
-    # Encodage non-ordinal (OneHot) pour les variables nominales
-    if list_nominal is not None and len(list_nominal) > 0:
-        onehot = ColumnTransformer(transformers=[('onehot', OneHotEncoder(), list_nominal)], 
-                                remainder='passthrough')
-        df = onehot.fit_transform(df)
-        
-        # Obtenir les nouveaux noms de colonnes et supprimer le préfixe 'onehot__'
-        new_columns = onehot.get_feature_names_out()
-        new_columns = [col.replace('onehot__', '') for col in new_columns]
-        
-        df = pd.DataFrame(df, columns=new_columns)
-        df.index = range(len(df))
-            
-    return df
-
+    return df_train, df_test if df_test is not None else df_train    
 class ParametricImputer:
     def __init__(self, random_state=42):
         self.random_state = random_state
@@ -289,10 +257,8 @@ class ParametricImputer:
             sampled_values = self.sample(n_missing)
             series.loc[missing] = sampled_values
         return series
-
 class MultiParametricImputer:
-    def __init__(self, distribution='lognorm', random_state=42):
-        self.distribution = distribution
+    def __init__(self, random_state=42):
         self.random_state = random_state
         self.imputers = {}
         self.fitted = False
@@ -302,7 +268,7 @@ class MultiParametricImputer:
         if not isinstance(X, pd.DataFrame):
             raise ValueError("L'entrée doit être un DataFrame pandas.")
         for col in X.columns:
-            imputer = ParametricImputer(distribution=self.distribution, random_state=self.random_state)
+            imputer = ParametricImputer(random_state=self.random_state)
             imputer.fit(X[col])
             self.imputers[col] = imputer
             self.imputed_info[col] = {
@@ -321,6 +287,7 @@ class MultiParametricImputer:
             if col in df_copy.columns:
                 df_copy[col] = imputer.transform(df_copy[col])
         return df_copy
+
     
 def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
     """
@@ -472,9 +439,16 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
     # Les autres
     other_features = [f for f in prop_nan.index if f not in low_corr_features and prop_nan.loc[f, 'NaN proportion'] > 0]
 
+    # Retirer la target si elle est dans les listes
+    if 'target' in locals() and target:
+        if target in low_corr_features:
+            low_corr_features.remove(target)
+        if target in other_features:
+            other_features.remove(target)
+    
     # --- Imputation paramétrique ---
     if low_corr_features:
-        parametric_imputer = MultiParametricImputer(distribution='norm')
+        parametric_imputer = MultiParametricImputer()
         parametric_imputer.fit(df_train[low_corr_features])
         df_train[low_corr_features] = parametric_imputer.transform(df_train[low_corr_features])
         if df_test is not None:
@@ -543,201 +517,135 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
 
     return df_train, df_test, scores_supervised, imputation_report
 
-def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
-    df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
-    
-    # Index des lignes valides (sans NaN dans les colonnes numériques)
-    valid_rows = df_numeric.dropna().index  
-    df_numeric = df_numeric.loc[valid_rows]  
 
-    if df_numeric.shape[1] == 0:
-        raise ValueError("Aucune colonne numérique dans le DataFrame.")
-
-    # Détection des outliers avec Isolation Forest
-    iforest = IsolationForest(n_estimators=500, contamination='auto', random_state=42, n_jobs=-1)
-    df.loc[valid_rows, 'outlier_iforest'] = iforest.fit_predict(df_numeric)
-    df['outlier_iforest'] = np.where(df['outlier_iforest'] == -1, 1, 0)
-
-    # Détection avec Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=20, contamination='auto')
-    outliers_lof = lof.fit_predict(df_numeric)  # Génère uniquement pour les lignes valides
-
-    # Assignation correcte des valeurs LOF
-    df.loc[valid_rows, 'outlier_lof'] = np.where(outliers_lof == -1, 1, 0)
-
-    # Fusion des résultats
-    df['outlier'] = ((df['outlier_iforest'] == 1) & (df['outlier_lof'] == 1)).astype(int)
-    df = df.drop(columns=['outlier_lof', 'outlier_iforest'])
-
-    # Suppression ou remplacement des outliers
-    seuil = max(0.05 * len(df), 1)  # Toujours au moins 1
-    if df['outlier'].sum() > seuil:
-        for col in df_numeric.columns:
-            mask_outliers = df['outlier'] == 1
-            mask_non_outliers = df['outlier'] == 0
-
-            mean = df.loc[mask_non_outliers, col].mean()
-            std = df.loc[mask_non_outliers, col].std()
-            if std == 0:
-                std = 1e-6  # Évite les valeurs identiques
-
-            df.loc[mask_outliers, col] = np.random.normal(mean, std, mask_outliers.sum())
-    else:
-        df = df[df['outlier'] == 0].drop(columns='outlier')
-    
-    return df
-
-def detect_outliers_iforest_lof(df: pd.DataFrame, target: str):
+def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, target: str = None, contamination: float = 0.01):
     """
-    Detects outliers in a dataset using Isolation Forest and Local Outlier Factor (LOF) methods.
-    The outliers are identified based on the combination of results from both methods, and can be either replaced using winsorization or removed based on a predefined threshold.
-
+    Détecte les outliers sur df_train avec Isolation Forest + LOF, winsorize les variables numériques.
+    Si df_test est fourni, applique la même winsorization dessus.
+    
     Args:
-        df (pd.DataFrame): The input DataFrame containing the data, including both numerical features and the target variable.
-        target (str): The name of the target variable column in the DataFrame, which will be excluded from outlier detection.
-
-    Raises:
-        ValueError: If the DataFrame does not contain any numeric columns after removing the target variable or has missing data.
+        df_train (pd.DataFrame): Base d'entraînement.
+        target (str): Nom de la cible à exclure.
+        df_test (pd.DataFrame, optional): Base de test. Si None, seul df_train est traité.
+        contamination (float): Contamination supposée pour IsolationForest et LOF.
 
     Returns:
-        pd.DataFrame: The input DataFrame with outliers flagged and handled (either winsorized or removed). A new column 'outlier' will indicate the final outliers after combining the results of both methods.
+        (df_train_winsorized, df_test_winsorized (si fourni sinon None), nombre_total_modifications (int))
     """
-    
-    # Sélectionner uniquement les colonnes numériques
-    df_numeric = df.select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
-    
-    # Index des lignes valides (sans NaN dans les colonnes numériques)
-    valid_rows = df_numeric.dropna().index  
-    df_numeric = df_numeric.loc[valid_rows]  
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
 
-    if df_numeric.shape[1] == 0:
-        raise ValueError("Aucune colonne numérique dans le DataFrame.")
+    # Extraire uniquement les variables numériques
+    features = df_train.drop(columns=[target], errors='ignore').select_dtypes(include=[np.number])
 
-    # Détection des outliers avec Isolation Forest
-    iforest = IsolationForest(n_estimators=500, contamination='auto', random_state=42, n_jobs=-1)
-    df.loc[valid_rows, 'outlier_iforest'] = iforest.fit_predict(df_numeric)
-    df['outlier_iforest'] = np.where(df['outlier_iforest'] == -1, 1, 0)
-    
-    # Détection avec Local Outlier Factor
-    lof = LocalOutlierFactor(n_neighbors=20, contamination='auto')
-    outliers_lof = lof.fit_predict(df_numeric)  # Génère uniquement pour les lignes valides
-    df.loc[valid_rows, 'outlier_lof'] = np.where(outliers_lof == -1, 1, 0)
+    # Virer les lignes où il manque des valeurs (seulement pour l'outlier detection)
+    valid_idx = features.dropna().index
+    features_valid = features.loc[valid_idx]
 
-    # Fusion des résultats
-    df['outlier'] = ((df['outlier_iforest'] == 1) & (df['outlier_lof'] == 1)).astype(int)
-    df = df.drop(columns=['outlier_lof', 'outlier_iforest'])
+    if features_valid.shape[1] == 0:
+        raise ValueError("Aucune variable numérique exploitable dans df_train.")
+    if features_valid.shape[0] < 10:
+        raise ValueError("Pas assez de données valides pour détecter les outliers.")
 
-    # Calcul de la proportion d'outliers détectés par les deux algos
-    proportion_outliers = df['outlier'].sum() / len(df)
+    # Détection sur les données sans NaN
+    iso = IsolationForest(n_estimators=500, contamination=contamination, random_state=42, n_jobs=-1)
+    out_iso = iso.fit_predict(features_valid)
 
-    # Suppression ou remplacement des outliers (winsorisation)
-    seuil = max(0.01 * len(df), 1)
-    if df['outlier'].sum() > seuil:
-        for col in df_numeric.columns:
-            # Appliquer la winsorisation aux outliers avec la proportion calculée
-            df[col] = winsorize(df[col], limits=[proportion_outliers, proportion_outliers])  # Limites ajustées selon proportion_outliers
+    lof = LocalOutlierFactor(n_neighbors=20, contamination=contamination, n_jobs=-1)
+    out_lof = lof.fit_predict(features_valid)
+
+    # Fusion des deux détecteurs
+    outliers = ((out_iso == -1) & (out_lof == -1)).astype(int)
+    outliers = pd.Series(outliers, index=features_valid.index)
+
+    # Définir bornes winsorization sur les données sans outliers
+    bounds = {}
+    for col in features.columns:
+        if col in features_valid.columns:
+            mask = (outliers == 1)
+            if mask.any():
+                lower = np.percentile(features_valid.loc[~mask, col], 1)
+                upper = np.percentile(features_valid.loc[~mask, col], 99)
+            else:
+                lower = np.percentile(features_valid[col], 1)
+                upper = np.percentile(features_valid[col], 99)
+            bounds[col] = (lower, upper)
+
+    # Winsorize train
+    n_modif_train = 0
+    for col, (lower, upper) in bounds.items():
+        if col in df_train.columns:
+            original = df_train[col].copy()
+            df_train[col] = np.clip(df_train[col], lower, upper)
+            n_modif_train += (original != df_train[col]).sum()
+
+    # Winsorize test si dispo
+    n_modif_test = 0
+    if df_test is not None:
+        for col, (lower, upper) in bounds.items():
+            if col in df_test.columns:
+                original = df_test[col].copy()
+                df_test[col] = np.clip(df_test[col], lower, upper)
+                n_modif_test += (original != df_test[col]).sum()
+
+    nb_outliers = int(n_modif_train + n_modif_test)
+
+    if df_test is not None:
+        return df_train, df_test, nb_outliers
     else:
-        df = df[df['outlier'] == 0]
-    
-    df = df.drop(columns='outlier')
-        
-    return df
+        return df_train, nb_outliers
 
-def transform_data(split_data: bool, df: pd.DataFrame = None, df_train: pd.DataFrame = None, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
+def transform_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_boxcox: list[str] = None, list_yeo: list[str] = None, list_log: list[str] = None, list_sqrt: list[str] = None):
     """
-    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées,
-    avec gestion optionnelle des ensembles d'entraînement et de test pour éviter toute fuite de données.
-
+    Applique des transformations statistiques (Box-Cox, Yeo-Johnson, Logarithme, Racine carrée) sur les colonnes spécifiées.
+    
     Args:
-        split_data (bool): 
-            Indique si les données sont séparées en df_train et df_test. Si False, 'df' est utilisé pour transformation globale.
-        df (pd.DataFrame, optional): 
-            DataFrame complet à transformer si split_data=False. Ignoré sinon.
-        df_train (pd.DataFrame, optional): 
-            DataFrame d'entraînement à transformer si split_data=True.
-        df_test (pd.DataFrame, optional): 
-            DataFrame de test à transformer si split_data=True.
-        list_boxcox (list[str], optional): 
-            Liste des colonnes sur lesquelles appliquer la transformation de Box-Cox (valeurs strictement positives).
-        list_yeo (list[str], optional): 
-            Liste des colonnes sur lesquelles appliquer la transformation de Yeo-Johnson (valeurs quelconques).
-        list_log (list[str], optional): 
-            Liste des colonnes à transformer via logarithme naturel (valeurs strictement positives).
-        list_sqrt (list[str], optional): 
-            Liste des colonnes à transformer via racine carrée (valeurs ≥ 0).
+        df_train (pd.DataFrame): DataFrame d'entraînement.
+        df_test (pd.DataFrame, optional): DataFrame de test, transformé avec les mêmes paramètres que df_train.
+        list_boxcox (list[str], optional): Colonnes pour transformation Box-Cox (valeurs > 0).
+        list_yeo (list[str], optional): Colonnes pour transformation Yeo-Johnson (valeurs quelconques).
+        list_log (list[str], optional): Colonnes pour transformation Log (valeurs > 0).
+        list_sqrt (list[str], optional): Colonnes pour transformation Racine carrée (valeurs ≥ 0).
 
     Returns:
-        pd.DataFrame or tuple(pd.DataFrame, pd.DataFrame): 
-            - Si split_data=False : retourne le DataFrame transformé (df).
-            - Si split_data=True : retourne un tuple (df_train, df_test) transformés.
+        tuple: (df_train transformé, df_test transformé si fourni sinon seulement df_train transformé)
     """
-    # Box-Cox Transformation
-    if list_boxcox and len(list_boxcox) > 0:
-        transformer_bc = PowerTransformer(method='box-cox')
-        
-        if split_data:
-            transformer_bc.fit(df_train[list_boxcox])
-            df_train[list_boxcox] = transformer_bc.transform(df_train[list_boxcox])
-            df_test[list_boxcox] = transformer_bc.transform(df_test[list_boxcox])
-        else:
-            df[list_boxcox] = transformer_bc.fit_transform(df[list_boxcox])
 
-    # Yeo-Johnson Transformation
-    if list_yeo and len(list_yeo) > 0:
-        transformer_yeo = PowerTransformer(method='yeo-johnson')
-        
-        if split_data:
-            transformer_yeo.fit(df_train[list_yeo])
-            df_train[list_yeo] = transformer_yeo.transform(df_train[list_yeo])
-            df_test[list_yeo] = transformer_yeo.transform(df_test[list_yeo])
-        else:
-            df[list_yeo] = transformer_yeo.fit_transform(df[list_yeo])
-    
-    # Logarithmic Transformation
-    if list_log and len(list_log) > 0:
-        if split_data:
-            for col in list_log:
-                df_train[col] = np.log(df_train[col])
-                df_test[col] = np.log(df_test[col])
-        else:        
-            for col in list_log:
-                df[col] = np.log(df[col])
+    df_train = df_train.copy()
+    df_test = df_test.copy() if df_test is not None else None
 
-    # Square Root Transformation
-    if list_sqrt and len(list_sqrt) > 0:
-        if split_data:
-            for col in list_sqrt:
-                df_train[col] = np.sqrt(df_train[col])
-                df_test[col] = np.sqrt(df_test[col])
-        else:
-            for col in list_sqrt:
-                df[col] = np.sqrt(df[col])
-    
-    if split_data:
-        return df_train, df_test
-    else:
-        return df
+    def apply_transform(transformer, cols):
+        transformer.fit(df_train[cols])
+        df_train[cols] = transformer.transform(df_train[cols])
+        if df_test is not None:
+            df_test[cols] = transformer.transform(df_test[cols])
 
-def calculate_inertia(X):
-    """
-    Calcule l'inertie (variance expliquée) de la dernière composante principale ajoutée à chaque étape
-    de l'ACP, en augmentant progressivement le nombre de composantes.
+    def simple_transform(func, cols, condition=lambda x: x < 0, error_msg="Valeurs invalides"):
+        for col in cols:
+            if condition(df_train[col]).any():
+                raise ValueError(f"{error_msg} pour '{col}'")
+            df_train[col] = func(df_train[col])
+            if df_test is not None:
+                df_test[col] = func(df_test[col])
 
-    Args:
-        X (np.ndarray or pd.DataFrame): 
-            Matrice des données (features uniquement), à transformer via ACP.
+    # Box-Cox (strictement positif)
+    if list_boxcox:
+        simple_transform(lambda x: x <= 0, list_boxcox, "Box-Cox nécessite des valeurs > 0")
+        apply_transform(PowerTransformer(method='box-cox'), list_boxcox)
 
-    Returns:
-        list[float]: 
-            Liste des pourcentages de variance expliquée par la dernière composante ajoutée à chaque itération 
-            (de 1 à n_features).
-    """
-    inertias = []
-    for i in range(1, X.shape[1] + 1):
-        pca = PCA(n_components=i)
-        pca.fit(X)
-        inertias.append(pca.explained_variance_ratio_[-1]*100)  # La dernière composante expliquée à chaque étape
-    return inertias
+    # Yeo-Johnson (n'importe quelle valeur)
+    if list_yeo:
+        apply_transform(PowerTransformer(method='yeo-johnson'), list_yeo)
+
+    # Log (strictement positif)
+    if list_log:
+        simple_transform(np.log, list_log, lambda x: x <= 0, "Log nécessite des valeurs > 0")
+
+    # Sqrt (positif ou nul)
+    if list_sqrt:
+        simple_transform(np.sqrt, list_sqrt, lambda x: x < 0, "Racine carrée nécessite des valeurs ≥ 0")
+
+    return df_train, df_test if df_test is not None else df_train
 
 def objective(trial, task="regression", model_type="Random Forest", multi_class=False, X=None, y=None, cv=5, scoring_comp='neg_root_mean_squared_error'):
     # Paramètres d'optimisation selon le type de modèle
@@ -760,13 +668,15 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
             objective = 'reg:squarederror'
             eval_metric = 'rmse'
         elif task == 'Classification':
-            objective = 'binary:logistic'  # pour la classification binaire
-            eval_metric = 'logloss'
-            num_class = 1  # binaire, pas nécessaire de définir num_class ici
-        else:  # pour la classification multiclasse
-            objective = 'multi:softmax'
-            eval_metric = 'mlogloss'
-            num_class = len(y_train.unique())  # Nombre de classes unique dans la variable cible
+            if multi_class:
+                objective = 'multi:softmax'
+                objective = 'binary:logistic'  # pour la classification binaire
+                eval_metric = 'logloss'
+                num_class = 1  # binaire, pas nécessaire de définir num_class ici
+            else:  # pour la classification multiclasse
+                objective = 'multi:softmax'
+                eval_metric = 'mlogloss'
+                num_class = len(y_train.unique())  # Nombre de classes unique dans la variable cible
 
         # Hyperparamètres à optimiser
         param = {
@@ -892,49 +802,56 @@ def optimize_model(model_choosen, task: str, X_train: pd.DataFrame, y_train: pd.
     
     return best_model, best_params, best_value
 
-def evaluate_and_decompose(estimator, X, y, scoring_dict, task, cv=5, random_seed=None):
+def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
+    """Calcule le biais et la variance d'un estimateur via une décomposition par validation croisée.
+
+    Cette fonction effectue une décomposition du biais et de la variance d'un modèle d'estimation en utilisant 
+    la validation croisée (KFold). Elle permet d'évaluer la performance de l'estimateur en termes de biais et 
+    de variance en fonction de la tâche (régression ou classification).
+
+    Args:
+        estimator (sklearn.base.BaseEstimator): L'estimateur (modèle) à évaluer.
+        X (array-like, shape (n_samples, n_features)): Matrices de caractéristiques, où chaque ligne est une 
+                                                      observation et chaque colonne est une caractéristique.
+        y (array-like, shape (n_samples,)): Vecteur ou matrice des valeurs cibles (vérités terrain), qui 
+                                            varient en fonction de la tâche (régression ou classification).
+        task (str): Type de tâche, soit "Classification", soit "Regression". Cela détermine le calcul du biais 
+                    et de la variance.
+        cv (int, optional): Nombre de divisions (splits) pour la validation croisée. Par défaut à 5.
+        random_seed (int, optional): Seed pour le générateur aléatoire, utile pour reproduire les résultats. 
+                                     Par défaut à None.
+
+    Returns:
+        tuple: Un tuple contenant les valeurs suivantes :
+            - avg_expected_loss (float): Perte moyenne (erreur quadratique moyenne pour la régression, erreur 
+                                          de classification pour la classification).
+            - avg_bias (float): Biais moyen (écart moyen entre les prédictions et les valeurs réelles).
+            - avg_var (float): Variance moyenne des prédictions.
+            - bias_relative (float): Biais relatif, normalisé par rapport à l'écart-type de la cible (régression) 
+                                     ou au nombre de classes (classification).
+            - var_relative (float): Variance relative des prédictions par rapport à la variance de la cible 
+                                     (régression) ou au nombre de classes (classification).
+    """
     # Initialisation
     rng = np.random.RandomState(random_seed)
     kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
-    
-    # Convertir X et y en tableaux numpy pour éviter l'erreur
-    X = X.to_numpy() if isinstance(X, pd.DataFrame) else X
-    y = y.to_numpy() if isinstance(y, pd.Series) else y
 
-    # Variables pour stocker les prédictions et les vraies valeurs
     all_pred = []
     y_tests = []
-    
-    # Variables pour stocker les scores de chaque pli
-    fold_scores = {metric: [] for metric in scoring_dict}
-    
+
     # Boucle sur les folds de validation croisée
     for train_idx, test_idx in kf.split(X):
         X_train_fold, X_test_fold = X[train_idx], X[test_idx]
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
-        
-        # Entraînement du modèle
         model = estimator.fit(X_train_fold, y_train_fold)
         preds = model.predict(X_test_fold)
         
-        # Stockage des prédictions et des vraies valeurs
         all_pred.append(preds)
         y_tests.append(y_test_fold)
-        
-        # Calcul des scores pour chaque métrique
-        for metric, scorer in scoring_dict.items():
-            score = scorer(estimator, X_test_fold, y_test_fold)
-            fold_scores[metric].append(score)
 
-    # Concatenate predictions and true values for global analysis
     all_pred = np.concatenate(all_pred)
     y_tests = np.concatenate(y_tests)
 
-    # Calcul des scores moyens et des écarts types pour chaque métrique
-    mean_scores = {metric: np.mean(fold_scores[metric]) for metric in scoring_dict}
-    std_scores = {metric: np.std(fold_scores[metric]).round(5) for metric in scoring_dict}
-
-    # Calcul du biais et de la variance
     if task == "Classification":
         # Classification : calcul de la majorité des prédictions (mode)
         main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
@@ -957,7 +874,7 @@ def evaluate_and_decompose(estimator, X, y, scoring_dict, task, cv=5, random_see
         bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
         var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
 
-    return mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
+    return avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
@@ -1012,119 +929,811 @@ def instance_model(index, df, task):
     
     return model
 
-df = pd.read_csv(r"C:\Store\Données\boston.csv", sep=';')
-target = "MEDV"
+df = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\train_clean.csv", sep=',')
+df_test = None
+
+# Tâche à accomplir
+to_do = "model"
+target = "SalePrice"
+
+# Paramètres de la préparation des données
 use_target = False
+split_data = True
+train_size = 80
+drop_dupli = True
 
-if not use_target:
-    df_copy=df.copy().drop(columns=target)
-
+drop_columns = ['id', 'Podcast_Name', 'Episode_Title']
 scale_all_data = True
 scale_method = "Robust Scaler"
+wrang_outliers = True
+contamination = 'auto'
 
-df_cat = df.select_dtypes(exclude=['number'])
+have_to_encode = True
+list_binary = None
+list_nominal = ['Genre', 'Publication_Day', 'Publication_Time']
+list_ordinal = ['Episode_Sentiment']
+ordered_values = ['Negative', 'Neutral', 'Positive']
+
+list_boxcox = None
+list_yeo = None
+list_log = None
+list_sqrt = None  
 
 use_pca = False
 n_components = 15
+explained_variance = None
 pca_option = "Nombre de composantes"
 
+if df_test is None and split_data:
+    train_size = train_size/100
+    df_train, df_test = train_test_split(df, train_size=train_size, shuffle=True, random_state=42)
+
+ordinal_mapping = {}    
+if list_ordinal:
+    for var in list_ordinal:
+        ordinal_mapping[var] = {val: idx for idx, val in enumerate(ordered_values)}
+        
+if scale_method:
+    if scale_method == "Standard Scaler":
+        scaler = StandardScaler()
+    elif scale_method == "MinMax Scaler":
+        scaler = MinMaxScaler()
+    elif scale_method == "Robust Scaler":
+        scaler = RobustScaler()
+    else:
+        scaler = QuantileTransformer(output_distribution='uniform')
 
 
-cv = 10
+# Paramètres de la modélisation
+cv = 5
 use_loocv=False
 scoring_comp = "neg_root_mean_squared_error"
-scoring_eval = ['neg_root_mean_squared_error']
+scoring_eval = ['neg_root_mean_squared_error', "neg_mean_absolute_percentage_error"]
 models = ["Linear Regression", 'KNN']
 task = "Regression" # "Classification", "Regression"
 if task == "Classification" and len(df[target].unique()) > 2:
     multi_class = True
 else:
     multi_class = False
-
-
-# 1. Analyser la corrélation des valeurs manquantes
-corr_mat, prop_nan = correlation_missing_values(df)
-
-# 2. Détecter les outliers
-df_outliers = detect_outliers_iforest_lof(df, target)
-
-# 3. Appliquer l'encodage des variables (binaire, ordinal, nominal)
-if df_cat.shape[1] > 0:
-    df_encoded = encode_data(df_outliers, list_binary=None, list_ordinal=["species"], list_nominal=None, ordinal_mapping={"species": {'Iris-setosa': 0, 'Iris-versicolor': 1, 'Iris-virginica': 2}})
-else:
-    df_encoded = df_outliers.copy()
     
-# 4. Imputer les valeurs manquantes
-df_imputed = impute_missing_values(df_encoded, corr_mat, prop_nan)
-    
-# 5. Mettre à l'échelle les données
-if scale_all_data:
-        if scale_method:
-            if scale_method == "Standard Scaler":
-                scaler = StandardScaler()
-            elif scale_method == "MinMax Scaler":
-                scaler = MinMaxScaler()
-            elif scale_method == "Robust Scaler":
-                scaler = RobustScaler()
-            else:
-                scaler = QuantileTransformer(output_distribution='uniform')
+if to_do == "wrang":
+    # Faire les traitements selon si split_data = True
+    df_test_exists = 'df_test' in globals() and df_test is not None and not df_test.empty
+    split_data_val = globals().get('split_data', False)
+
+    if df_test_exists or split_data_val:
+        # Suppression des colonnes inutiles
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
+            df_test = df_test.drop(columns=drop_columns)
+           
+        # Suppression des doublons
+        if drop_dupli:
+            len_before_dupli =len(df)
+            df = df.drop_duplicates()
+            len_after_dupli =len(df)
+            len_diff = len_before_dupli - len_after_dupli
+        else:
+            len_diff = "Les doublons n'ont pas été traités."       
+        
+        # Etude des valeurs manquantes
+        len_before_nan_target_train = len(df)
+        df_train = df.dropna(subset=[target])
+        len_after_nan_target_train = len(df_train)
+        len_diff_nan_target_train = len_before_nan_target_train - len_after_nan_target_train
+        
+        if target in df_test.columns:
+            len_before_nan_target_test = len(df_test)
+            df_test = df_test.dropna(subset=[target])
+            len_after_nan_target_test = len(df_test)
+            len_diff_nan_target_test = len_before_nan_target_test - len_after_nan_target_test
         
             
+        corr_mat_train, corr_mat_test, corr_mat, prop_nan_train, prop_nan_test, prop_nan = correlation_missing_values(df_train, df_test)
+        
+        # Détecter les outliers
+        if wrang_outliers:
+            df_train_outliers, df_test_outliers, nb_outliers = detect_and_winsorize(df_train, df_test, target = target, contamination = contamination)
+        else:
+            df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
+            
+        # Imputer les valeurs manquantes
+        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        
+        # Appliquer l'encodage des variables (binaire, ordinal, nominal)
+        if have_to_encode:
+            df_train_encoded, df_test_encoded = encode_data(df_train_imputed, df_test_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+        else:
+            df_train_encoded, df_test_encoded = df_train_imputed.copy(), df_test_imputed.copy()
+    
+        # Sélection des vraies variables numériques depuis df_train_imputed
+        num_cols = df_train_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_train_imputed.select_dtypes(include=['number']).columns
+
+        # Mise à l'échelle
+        if scale_all_data:
+            if scale_method:
+                scaler.fit(df_train_encoded[num_cols])
+
+                df_train_scaled = df_train_encoded.copy()
+                df_train_scaled[num_cols] = scaler.transform(df_train_encoded[num_cols])
+
+                df_test_scaled = df_test_encoded.copy()
+                df_test_scaled[num_cols] = scaler.transform(df_test_encoded[num_cols])
+            else:
+                print("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
+                
+        # Appliquer les transformations individuelles
+        if not scale_all_data:
+            df_train_scaled, df_test_scaled = transform_data(df_train_imputed, df_test_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+
+        # Application de l'ACP en fonction du choix de l'utilisateur
+        if use_pca:
+            # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
+            if pca_option == "Nombre de composantes":
+                n_components = min(n_components, df_train_scaled.shape[1])
+                pca = PCA(n_components=n_components)
+            elif pca_option == "Variance expliquée":
+                if explained_variance == 100:
+                    pca = PCA(n_components=None)
+                else:
+                    pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+            else:
+                pca = PCA()  # Par défaut, on prend tous les composants
+
+            # Appliquer l'ACP sur les variables explicatives d'entrainement
             if not use_target:
-                df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed.drop(columns=target)),
-                                        columns=df_imputed.drop(columns=target).columns,
-                                        index=df_imputed.index)
-                df_scaled = pd.concat([df_scaled, df_imputed[target]], axis=1)
+                df_explicatives_train = df_train_scaled.drop(columns=[target])
+            else:
+                df_explicatives_train = df_train_scaled.copy()
+
+            # Apprentissage de l'ACP sur l'ensemble d'entraînement
+            pca.fit(df_explicatives_train)
+
+            # Transformation des données d'entraînement
+            df_pca_train = pca.transform(df_explicatives_train)
+            
+            # Créer le DataFrame avec les composantes principales pour l'entraînement
+            df_pca_train = pd.DataFrame(df_pca_train, columns=[f'PC{i+1}' for i in range(df_pca_train.shape[1])], index=df_explicatives_train.index)
+
+            # Ajouter le target si nécessaire pour l'entraînement
+            if not use_target:
+                df_target_train = df_train_scaled[target]
+                df_train_scaled = pd.concat([df_pca_train, df_target_train], axis=1)
+            else:
+                df_train_scaled = df_pca_train.copy()
+
+            # Transformation des données de test avec le même modèle PCA
+            if not use_target:
+                df_explicatives_test = df_test_scaled.drop(columns=[target])
+            else:
+                df_explicatives_test = df_test_scaled.copy()
+
+            # Transformation des données de test en utilisant l'ACP ajustée sur les données d'entraînement
+            df_pca_test = pca.transform(df_explicatives_test)
+            
+            # Créer le DataFrame avec les composantes principales pour le test
+            df_pca_test = pd.DataFrame(df_pca_test, columns=[f'PC{i+1}' for i in range(df_pca_test.shape[1])], index=df_explicatives_test.index)
+
+            # Ajouter le target si nécessaire pour les données de test
+            if not use_target:
+                df_target_test = df_test_scaled[target]
+                df_test_scaled = pd.concat([df_pca_test, df_target_test], axis=1)
+            else:
+                df_test_scaled = df_pca_test.copy()
+
+            # Calcul des inerties (variances expliquées par composante) sur l'ensemble d'entraînement
+            pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
+            pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+
+            # Création du DataFrame pour la variance expliquée et cumulative
+            pca_infos = pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+            pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
+            pca_infos['Nombre de composantes'] += 1
+
+            # Visualisation avec Plotly (ou Seaborn si tu préfères)
+            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                        markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+            fig.update_layout(
+                xaxis_title='Nombre de composantes principales',
+                yaxis_title='Variance (%)',
+                legend_title='Type de variance',
+                width=900, height=600)
+            
+        # Finir le traitement
+        wrang_finished = True
+
+        # Afficher le descriptif de la base de données
+        print("### Descriptif de la base de données :")
+        print("**Nombre d'observations (train) :**", df_train.shape[0])
+        print("**Nombre de variables (train) :**", df_train.shape[1])
+        print("**Nombre d'observations (test) :**", df_test.shape[0])
+        print("**Nombre de variables (test) :**", df_test.shape[1])
+
+        # Description des données
+        if df_train is not None:
+            description_train = []
+            for col in df_train.columns:
+                if pd.api.types.is_numeric_dtype(df_train[col]):
+                    var_type = 'Numérique'
+                    n_modalites = np.nan
+                else:
+                    var_type = 'Catégorielle'
+                    n_modalites = df_train[col].nunique()
+
+                description_train.append({
+                    'Variable': col,
+                    'Type': var_type,
+                    'Nb modalités': n_modalites
+                })
+            print(pd.DataFrame(description_train))
+        
+            
+            print("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
+            print(corr_mat_train)
+
+            print("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
+            print(corr_mat_test)
+
+            print("**Proportion de valeurs manquantes par variable (train), en % :**")
+            print(prop_nan_train.sort_values(by='NaN proportion', ascending=False))
+
+            print("**Proportion de valeurs manquantes par variable (test), en % :**")
+            print(prop_nan_test.sort_values(by='NaN proportion', ascending=False))
+
+           
+            print("**Nombre de doublons traités :**", len_diff)
+            print("**Nombre d'observations supprimées car la variable cible est manquante (train) :**", len_diff_nan_target_train)
+            if df_test is not None and target in df_test.columns:
+                print("**Nombre d'observations supprimées car la variable cible est manquante (test) :**", len_diff_nan_target_test)
+            print("**Nombre d'outliers traités :**", nb_outliers)
+
+            print("**Résumé des méthodes d'imputation utilisées :**")
+            print(imputation_report)
+
+            print("**Score de l'imputation supervisée :**")
+            print(scores_supervised)
+    
+        # Affichage du graphique PCA si nécessaire
+        if use_pca:
+            fig.show()
+
+        # Préparation pour le téléchargement
+        if df_train is not None and df_test is not None:
+            # Créer un dossier temporaire pour stocker les fichiers CSV
+            with io.BytesIO() as buffer:
+                with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    # Sauvegarder train et test dans des fichiers CSV dans le zip
+                    with io.StringIO() as csv_buffer_train, io.StringIO() as csv_buffer_test:
+                        df_train_scaled.to_csv(csv_buffer_train, index=False)
+                        df_test_scaled.to_csv(csv_buffer_test, index=False)
+                        
+                        zip_file.writestr("train.csv", csv_buffer_train.getvalue())
+                        zip_file.writestr("test.csv", csv_buffer_test.getvalue())
+                
+                # Préparer le téléchargement du dossier zip contenant les deux fichiers
+                print("### Aperçu des données traitées :")
+                print(df_train_scaled)           
+    
+    else:
+        # Suppression des colonnes inutiles
+        if drop_columns:
+            df = df.drop(columns=drop_columns)
+        # Suppression des doublons
+        if drop_dupli:
+            len_before_dupli = len(df)
+            df = df.drop_duplicates()
+            len_after_dupli = len(df)
+            len_diff = len_before_dupli - len_after_dupli
         else:
-            df_scaled = pd.DataFrame(scaler.fit_transform(df_imputed), columns=df_imputed.columns)
-
-else:
-    df_scaled = scale_data(df_imputed, list_standard=None, list_minmax=None, list_robust=None, list_quantile=None)
-
-
-# Application de l'ACP en fonction du choix de l'utilisateur
-if use_pca:
-    pca = PCA()
-    df_explicatives = df_scaled.drop(columns=[target])
-    df_target = df_scaled[target]
+            len_diff = "Les doublons n'ont pas été traités."
+            
+        # Etude des valeurs manquantes
+        len_before_nan_target = len(df)
+        df = df.dropna(subset=[target])
+        len_after_nan_target = len(df)
+        len_diff_nan_target = len_before_nan_target - len_after_nan_target
+                    
+        corr_mat, _, _, prop_nan, _, _ = correlation_missing_values(df)
     
-    # Si l'utilisateur choisit le nombre de composantes
-    if pca_option == "Nombre de composantes":
-        # Ajuster n_components en fonction du nombre de features disponibles
-        n_components = min(n_components, df_explicatives.shape[1])
-        pca = PCA(n_components=n_components)
-        df_pca = pca.fit_transform(df_explicatives)
-    
-    # Si l'utilisateur choisit la variance expliquée
-    elif pca_option == "Variance expliquée":
-        if explained_variance == 100:
-            # Utilisation de la méthode PCA avec "None" pour récupérer toutes les composantes qui expliquent 100% de la variance
-            pca = PCA(n_components=None)  
+        # Détecter les outliers
+        if wrang_outliers:
+            df_outliers, nb_outliers = detect_and_winsorize(df, target = target, contamination = contamination)
         else:
-            pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
-        df_pca = pca.fit_transform(df_explicatives)
+            df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
+            
+        # Imputer les valeurs manquantes
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
     
-    df_pca = pd.DataFrame(pca.fit_transform(df_explicatives), columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
-    df_scaled2 = pd.concat([df_pca, df_target], axis=1)
+        # Appliquer l'encodage des variables (binaire, ordinal, nominal)
+        if have_to_encode:
+            df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+        else:
+            df_encoded = df_outliers.copy()
+        
+        # Mettre à l'échelle les données
+        if scale_all_data:
+            if scale_method:
+                num_cols = df_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_imputed.select_dtypes(include=['number']).columns
+                
+                df_scaled = df_encoded.copy()
+                scaler.fit(df_encoded[num_cols])
+                df_scaled[num_cols] = scaler.transform(df_encoded[num_cols])
+            else:
+                print("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
+    
+        # Appliquer les transformations individuelles
+        if not scale_all_data:
+            df_scaled = transform_data(df_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+    
+        # Application de l'ACP en fonction du choix de l'utilisateur
+        if use_pca:
+            # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
+            if pca_option == "Nombre de composantes":
+                n_components = min(n_components, df_scaled.shape[1])
+                pca = PCA(n_components=n_components)
+            elif pca_option == "Variance expliquée":
+                if explained_variance == 100:
+                    pca = PCA(n_components=None)
+                else:
+                    pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+            else:
+                pca = PCA()  # Par défaut, on prend tous les composants
 
-if use_pca:   
-    # Calcul du critère du coude
-    pca_inertias = calculate_inertia(df_explicatives)
-    pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
-    pca_infos=pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance cumulée': pca_cumulative_inertias})
-    pca_infos=pca_infos.reset_index().rename(columns={'index':'Nombre de composantes'})
-    pca_infos['Nombre de composantes'] += 1
+            # Appliquer l'ACP sur les variables explicatives
+            if not use_target:
+                df_explicatives = df_scaled.drop(columns=[target])
+            else:
+                df_explicatives = df_scaled.copy()
+
+            # Apprentissage de l'ACP
+            pca.fit(df_explicatives)
+
+            # Transformation des données
+            df_pca = pca.transform(df_explicatives)
+            
+            # Créer le DataFrame avec les composantes principales
+            df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
+
+            # Ajouter le target si nécessaire
+            if not use_target:
+                df_target = df_scaled[target]
+                df_scaled = pd.concat([df_pca, df_target], axis=1)
+            else:
+                df_scaled = df_pca.copy()
+
+            # Calcul des inerties (variances expliquées par composante)
+            pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
+            pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+
+            # Création du DataFrame pour la variance expliquée et cumulative
+            pca_infos = pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+            pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
+            pca_infos['Nombre de composantes'] += 1
+
+            # Visualisation avec Plotly (ou Seaborn si tu préfères)
+            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                        markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+            fig.update_layout(
+                xaxis_title='Nombre de composantes principales',
+                yaxis_title='Variance (%)',
+                legend_title='Type de variance',
+                width=900, height=600
+            )
     
-    # Visualisation avec Seaborn
-    plt.figure(figsize=(8, 6))
-    sns.lineplot(x=pca_infos["Nombre de composantes"], y=pca_infos["Variance expliquée"], marker='o', color='b', label="Variance expliquée")
-    sns.lineplot(x=pca_infos["Nombre de composantes"], y=pca_infos["Variance cumulée"], marker='o', color='r', label="Variance cumulée")
-    plt.title("Méthode du coude pour l'ACP", fontsize=14)
-    plt.xlabel('Nombre de composantes principales', fontsize=12)
-    plt.ylabel('Variance (%)', fontsize=12)
-    plt.xticks(range(1, len(pca_inertias) + 1))
-    plt.legend(loc='best')
-    plt.show()
+        # Finir le traitement
+        wrang_finished = True
+        # Afficher le descriptif de la base de données
+        print("### Descriptif de la base de données :")
+        print("**Nombre d'observations :**", df.shape[0])
+        print("**Nombre de variables :**", df.shape[1])
+            
+        if df is not None:
+            description = []
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    var_type = 'Numérique'
+                    n_modalites = np.nan
+                else:
+                    var_type = 'Catégorielle'
+                    n_modalites = df[col].nunique()
+                
+                description.append({
+                    'Variable': col,
+                    'Type': var_type,
+                    'Nb modalités': n_modalites
+                })
+            print(pd.DataFrame(description))
+            
+            
+            print("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
+            print(corr_mat)
+            
+            print("**Proportion de valeurs manquantes par variable (en %) :**")
+            print(prop_nan.sort_values(by='NaN Proportion', ascending=False))
+
+        
+            print("**Nombre de doublons traités :**", len_diff)
+            print("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
+            print("**Nombre d'outliers traités :**", nb_outliers)
+
+            print("**Résumé des méthodes d'imputation utilisées :**")
+            print(imputation_report)
+
+            print("**Score de l'imputation supervisée :**")
+            print(scores_supervised)
+        
+            if use_pca:
+                fig.show()
+        
+        # Téléchargement du fichier encodé
+        if df is not None:
+            df = df_scaled.copy()
+            csv_buffer = io.StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            
+            # Afficher l'aperçu des données traitées
+            print("### Aperçu des données traitées :")
+            print(df_scaled)
+            
+            
+if to_do == "model":
+    # Effectuer la modélisation
+
+    # Division des données
+    if df_test is None:
+        X = df.drop(columns=target)
+        y = df[target]
+        X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size, shuffle=True)
+    else:
+        X_train = df.drop(columns=target)
+        y_train = df[target]
+        X_test = df_test.drop(columns=target)
+        y_test = df_test[target]
+
+    # Choisir le meilleur modèle
+    results = []
+    for model in models:  
+        # Déterminer chaque modèle à optimiser
+        if model in ["Linear Regression", "Logistic Regression", "KNN"]:
+            n_trial = 80
+        else:
+            n_trial = 40
+        repeats = n_trial
+        
+        best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
+                                                            X_train=X_train, y_train=y_train,
+                                                            cv=cv, scoring=scoring_comp,
+                                                            multi_class=multi_class,
+                                                            n_trials=n_trial, n_jobs=-1)
+        
+        # Ajouter les résultats à la liste
+        results.append({
+            'Model': model,
+            'Best Model': best_model,
+            'Best Params': best_params})
+
+    # Créer un DataFrame à partir des résultats
+    df_train = pd.DataFrame(results)
+
+    df_train2=df_train.copy()        
+    df_train2.set_index('Model', inplace=True)
+    df_train2["Best Model"] = df_train2["Best Model"].astype(str)
+      
+    print(df_train2.drop(columns='Best Params'))
+    
+    # Evaluer les meilleurs modèles
+    list_models = df_train['Best Model'].tolist()
+
+    list_score = []
+    for model in list_models:  # Utilise les vrais objets modèles
+        scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
+        mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
+        std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
+
+        list_score.append({
+            'Best Model': str(model),  # Affichage du nom seulement
+            'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
+            'Std Scores': std_scores
+        })
+
+    df_score = pd.DataFrame(list_score)  
+
+    # Dictionnaires des métriques
+    metrics_regression = {
+        "R² Score": "r2",
+        "Mean Squared Error": "neg_mean_squared_error",
+        "Root Mean Squared Error": "neg_root_mean_squared_error",
+        "Mean Absolute Error": "neg_mean_absolute_error",
+        "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
+    }
+
+    metrics_classification = {
+        "Accuracy": "accuracy",
+        "F1 Score (Weighted)": "f1_weighted",
+        "Precision (Weighted)": "precision_weighted",
+        "Recall (Weighted)": "recall_weighted"
+    }
+
+    # Inverser les dictionnaires des métriques
+    inv_metrics = {v: k for k, v in metrics_regression.items()} if task == "Regression" else {v: k for k, v in metrics_classification.items()}
+
+    for metric in scoring_eval:
+        df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
+        df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
+        
+    # Renommage des colonnes pour des noms plus lisibles
+    for metric in scoring_eval:
+        clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
+        df_score.rename(columns={
+            f"Mean {metric}": f"Mean - {clean_metric}",
+            f"Std {metric}": f"Std - {clean_metric}"
+        }, inplace=True)
+
+    # Derniers traitement
+    df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
+    df_score.index = df_train2.index
+    df_score2 = df_score.drop(columns='Best Model')
+    print(df_score2)
+    
+    # Afficher les coefficients des modèles linéaires
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+
+        if task == 'Regression' and isinstance(model, (LinearRegression, ElasticNet, Ridge, Lasso)):
+            model.fit(X_train, y_train)
+            coefs = model.coef_
+            intercept = model.intercept_
+            df_coefs = pd.DataFrame({
+                'Variable': X_train.columns,
+                'Coefficient': coefs
+            }).sort_values(by='Coefficient', key=abs, ascending=False)
+            df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+            
+            # Ajout de la constante
+            df_intercept = pd.DataFrame({
+                'Variable': ['Intercept'],
+                'Coefficient': [intercept if np.isscalar(intercept) else intercept[0]]
+            })
+            df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+            
+            # Affichage
+            print(df_coefs)
+
+        elif task == 'Classification' and isinstance(model, LogisticRegression):
+            model.fit(X_train, y_train)
+            intercept = model.intercept_
+
+            # Si régression logistique multinomiale
+            if model.coef_.ndim > 1:
+                # Ici, tu veux afficher les coefficients pour chaque classe
+                for i, coefs in enumerate(model.coef_):
+                    df_coefs = pd.DataFrame({
+                        'Variable': X_train.columns,
+                        'Coefficient': coefs
+                    }).sort_values(by='Coefficient', key=abs, ascending=False)
+                    df_coefs['Coefficient'] = df_coefs['Coefficient'].round(5)
+                    
+                    # Ajout de la constante pour chaque classe
+                    df_intercept = pd.DataFrame({
+                        'Variable': ['Intercept'],
+                        'Coefficient': [intercept[i] if np.isscalar(intercept) else intercept[i]]
+                    })
+                    df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+
+                    # Affichage des coefficients pour chaque classe
+                    print(df_coefs)
+            else:
+                coefs = model.coef_[0]
+                df_coefs = pd.DataFrame({
+                    'Variable': X_train.columns,
+                    'Coefficient': coefs
+                }).sort_values(by='Coefficient', key=abs, ascending=False)
+                df_coefs['Coefficient'] = df_coefs['Coefficient'].round(3)
+
+                # Ajout de l'intercept
+                df_intercept = pd.DataFrame({
+                    'Variable': ['Intercept'],
+                    'Coefficient': [intercept if np.isscalar(intercept) else intercept[0]]
+                })
+                df_coefs = pd.concat([df_intercept, df_coefs], ignore_index=True)
+
+                # Affichage
+                print(df_coefs)
+                 
+    
+    # Calculer les odds-ratios pour la régression logistique
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        if isinstance(model, LogisticRegression) and task == 'Classification':
+            model.fit(X_train, y_train)
+            odds_ratios = np.exp(model.coef_[0])
+            df_odds = pd.DataFrame({
+                'Variable': X_train.columns,
+                'Odds Ratio': odds_ratios
+            }).sort_values(by='Odds Ratio', ascending=False)
+            df_odds['Odds Ratio'] = df_odds['Odds Ratio'].round(2)
+            print(df_odds)
+    
+    # Afficher SHAPE et LIME       
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        model.fit(X_train, y_train)
+
+        try:
+            # SHAP - modèles linéaires
+            if isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
+                explainer = shap.LinearExplainer(model, X_train)
+                shap_values = explainer(X_train)
+                plt.clf()
+                shap.summary_plot(shap_values, X_train, show=False)
+                fig = plt.gcf()
+                fig.show()
+
+            # LIME - uniquement pour KNN
+            elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
+                mode = "classification" if task == "Classification" else "regression"
+                lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
+                explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
+                print(explanation.as_pyplot_figure())
+
+            # SHAP - arbres (RandomForest, XGBoost, LightGBM)
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_train)
+                plt.clf()
+                shap.summary_plot(shap_values, X_train, show=False)
+                fig = plt.gcf()
+                fig.show()
+
+        except Exception as e:
+            print(f"Erreur pour {idx} : {e}")    
+    
+    
+    # Appliquer le modèle : calcul-biais-variance    
+    bias_variance_results = []
+    for idx, best_model in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
+            model, task=task,
+            X=X_train.values, y=y_train.values,
+            cv=cv)
+
+        # Création d'un dictionnaire pour stocker les résultats
+        result = {
+            "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
+            "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
+            "Bias relatif": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
+            "Variance relatif": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+        }
+        
+        # Logique de conclusion en fonction du biais relatif et de la variance relative
+        if abs(bias_relative) > 0.2 and var_relative > 0.2:
+            result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
+        elif abs(bias_relative) > 0.2:
+            result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
+        elif var_relative > 0.2:
+            result["Conclusion"] = "Variance élevée : suspicion de sur-ajustement"
+        else:
+            result["Conclusion"] = "Bien équilibré"
+        
+        # Ajout du dictionnaire à la liste des résultats
+        bias_variance_results.append(result)            
+        
+    # Création du DataFrame
+    df_bias_variance = pd.DataFrame(bias_variance_results)
+    df_bias_variance.index = df_train2.index
+
+    # Affichage dans Streamlit
+    print(df_bias_variance)
+
+    # Matrices de confusion
+    if task == 'Classification':
+        for index, model in df_score['Best Model'].items():
+            model = instance_model(idx, df_train2, task)
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            
+            # Calculer la matrice de confusion
+            cm = confusion_matrix(y_test, y_pred)
+            
+            fig, ax = plt.subplots(figsize=(3, 2))  # Taille du graphique
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                        xticklabels=[f"Classe {i}" for i in range(cm.shape[1])] if multi_class else ["Classe 0", "Classe 1"],
+                        yticklabels=[f"Classe {i}" for i in range(cm.shape[0])] if multi_class else ["Classe 0", "Classe 1"],
+                        annot_kws={"size": 5},
+                        cbar=False)  # Désactiver la barre de couleur si tu veux
+
+            # Ajuster la taille des labels
+            ax.set_xticklabels(ax.get_xticklabels(), fontsize=5)  # Taille des labels sur l'axe X
+            ax.set_yticklabels(ax.get_yticklabels(), fontsize=5)  # Taille des labels sur l'axe Y
+            
+            plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
+            plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
+            plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
+            plt.tight_layout()  # Ajuster la mise en page
+            fig.show()
+            
+    
+    # Feature importance
+    for idx, mdl in df_score['Best Model'].items():
+        model = instance_model(idx, df_train2, task)
+        model.fit(X_train, y_train)
+        
+        # Calculer l'importance des features par permutation
+        result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
+
+        # Extraire l'importance moyenne des features
+        importances = result.importances_mean
+        std_importances = result.importances_std
+
+        # Trier les importances par ordre décroissant
+        sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
+
+        # Trier les valeurs d'importance et les noms des features
+        sorted_importances = importances[sorted_idx]
+        sorted_std_importances = std_importances[sorted_idx]
+        sorted_features = X_train.columns[sorted_idx]
+
+        # Créer le graphique
+        plt.figure(figsize=(5, 3))
+        plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
+        plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
+        plt.xticks(fontsize=6)
+        plt.xlabel("Importance", fontsize=7)
+        plt.title(f"Importance des variables par permutation - {idx}", fontsize=8)
+        plt.gca().invert_yaxis()
+        plt.tight_layout()
+        plt.show()
+            
+    # Courbes d'apprentissage    
+    for idx, mdl in df_score['Best Model'].items(): 
+        model = instance_model(idx, df_train2, task)       
+        train_sizes, train_scores, test_scores = learning_curve(
+            model, X_train, y_train, cv=cv, scoring=scoring_comp,
+            train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
+        )
+
+        train_scores_mean = np.mean(train_scores, axis=1)
+        test_scores_mean = np.mean(test_scores, axis=1)
+
+        plt.figure(figsize=(5, 3))
+        plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
+        plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
+        plt.title(f"Learning Curve - {idx}", fontsize=8)
+        plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
+        plt.ylabel("Score", fontsize=7)
+        plt.legend(loc="best", fontsize=6)
+        plt.xticks(fontsize=6)
+        plt.yticks(fontsize=6)
+        plt.tight_layout()
+        plt.show()
+        
+    # Analyse de drift
+    drift_results = []
+
+    for col in X.columns:
+        stat, p_value = ks_2samp(X_train[col], X_test[col])
+        drift_results.append({
+            "Feature": col,
+            "KS Statistic": round(stat, 4),
+            "p-value": round(p_value, 4),
+            "Drift détecté": "Oui" if p_value < 0.05 else "Non"
+        })
+
+    df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
+    df_drift.set_index("Feature", inplace=True)
+    df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
+    
+    if not df_drift.empty:
+        print(df_drift)
+    else:
+        print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")            
+            
 
 
 
