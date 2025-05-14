@@ -1004,14 +1004,14 @@ st.subheader("Votre assistant flexible pour le traitement des données et la mod
 
 st.write(
     """
-    **NOVA** vous accompagne dans la préparation et l’optimisation de vos modèles de machine learning.  
-    Conçue pour les professionnels qui savent que chaque projet est unique, **NOVA** offre des outils puissants
+    L'assistant **NOVA** vous accompagne dans la préparation et l’expérimentation de vos modèles de Machine Learning.  
+    Plus besoinde coder pour des traitements et de la modélisation basiques. Conçue pour les professionnels qui savent que chaque projet est unique, **NOVA** offre des outils automatisés puissants
     pour la gestion des données et l'ajustement des modèles, tout en laissant l'exploration et la personnalisation à votre charge.
 
     **Fonctionnalités principales :**
     - 🔄 **Prétraitement des données** : mise à l’échelle, encodage, gestion des valeurs manquantes, outliers, et transformations adaptées.
     - 🔍 **Optimisation des hyperparamètres** : recherche des meilleurs réglages pour 7 modèles populaires (régression linéaire/logistique, KNN, Random Forest, LightGBM, XGboost).
-    - 🏆 **Évaluation des modèles** : validation croisée, analyse biais-variance, importance par permutation, analyse de drift et matrice de confusion pour les tâches de classification.
+    - 🏆 **Évaluation et interprétation des modèles** : validation croisée, analyse biais-variance, importance par permutation, analyse de drift, LIME/SHAPE et matrice de confusion pour les tâches de classification.
     
     **NOVA** permet à chaque utilisateur de bénéficier d’une infrastructure robuste, tout en maintenant une flexibilité totale sur le traitement fondamental des données.
     Vous contrôlez les choix, nous optimisons les outils.
@@ -1062,7 +1062,7 @@ if df is not None:
         st.sidebar.subheader("Informations générales")
         
         # Supprimer les colonnes inutiles
-        drop_columns = st.sidebar.multiselect("Quelle(s) variables voulez-vous supprimer instantanément ?", df.columns.to_list(), help="Sélectionnez les colonnes que vous souhaitez supprimer de la base de données.")
+        drop_columns = st.sidebar.multiselect("Quelle(s) variable(s) voulez-vous supprimer instantanément ?", df.columns.to_list(), help="Sélectionnez les colonnes que vous souhaitez supprimer de la base de données.")
         
         # Demander la variable cible
         target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
@@ -1097,7 +1097,7 @@ if df is not None:
         st.sidebar.subheader("Mise à l'échelle des variables numériques")
         
         # Déterminer si la variable cible doit être incluse dans la mise à l'échelle
-        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Si vous n'avez pas de variable cible, ne cochez pas cette case, sinon cochez-là")
+        use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Si vous avez une variable cible, ne cochez pas cette case, sinon cochez-là")
         
         if not use_target:
             df_copy=df.copy().drop(columns=target)
@@ -1118,13 +1118,13 @@ if df is not None:
                 else:
                     scaler = QuantileTransformer(output_distribution='uniform')
         
-        # Obtenir des dataframes distinctes selon les types des données
+        # Obtenir des dataframes distinctes selon les types des données            
         if not use_target:
             df_num = df_copy.select_dtypes(include=['number'])
-            df_cat = df_copy.select_dtypes(exclude=['number'])
+            df_cat = df_copy.drop(columns=drop_columns).select_dtypes(exclude=['number']) if drop_columns else df_copy.select_dtypes(exclude=['number'])
         else:
             df_num = df.select_dtypes(include=['number'])
-            df_cat = df.select_dtypes(exclude=['number'])
+            df_cat = df.drop(columns=drop_columns).select_dtypes(exclude=['number']) if drop_columns else df.select_dtypes(exclude=['number'])
         
         # Sélection des variables à encoder
         have_to_encode = False
