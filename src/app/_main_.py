@@ -1009,6 +1009,7 @@ df = None
 uploaded_file_train = st.file_uploader("Choisissez un fichier d'entraînement (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="train")
 uploaded_file_test = st.file_uploader("Choisissez un fichier de validation (csv, xlsx, txt)", type=["csv", "xlsx", "txt"], key="test")
 wrang = st.checkbox("La base de données nécessite un traitement")
+split_data = False
 valid_train = False
 valid_test = False
 valid_mod=False
@@ -1084,10 +1085,14 @@ if df is not None:
         use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Si vous avez une variable cible, ne cochez pas cette case, sinon cochez-là")
         
         if not use_target:
-            if split_data:
-                df_to_wrang = df_train.drop(columns=target)
+            if target and target in df.columns:
+                if split_data:
+                    df_to_wrang = df_train.drop(columns=target)
+                else:
+                    df_to_wrang = df.drop(columns=target)
             else:
-                df_to_wrang=df.drop(columns=target)
+                st.warning("La variable cible est invalide ou non définie.")
+                pb = True
         
         # Tout mettre à l'échelle directement
         scale_all_data = st.sidebar.checkbox("Voulez-vous mettre à l'échelle vos données ?")
@@ -1288,8 +1293,7 @@ if df is not None:
         # Valider les choix
         valid_mod = st.sidebar.button("Valider les choix de modélisation")
 
-if valid_wrang:
-    
+if valid_wrang:    
     # Faire les traitements selon si split_data = True
     df_test_exists = 'df_test' in globals() and df_test is not None and not df_test.empty
     split_data_val = globals().get('split_data', False)
