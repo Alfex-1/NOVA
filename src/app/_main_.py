@@ -1086,10 +1086,10 @@ if df is not None:
         
         if not use_target:
             if target and target in df.columns:
-                if split_data:
-                    df_to_wrang = df_train.drop(columns=target)
-                else:
+                if df_test is None:
                     df_to_wrang = df.drop(columns=target)
+                else:
+                    df_to_wrang = df_train.drop(columns=target)
             else:
                 st.warning("La variable cible est invalide ou non définie.")
                 pb = True
