@@ -1032,9 +1032,10 @@ if uploaded_file_test is not None:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 
 if df_train is not None:
+    st.dataframe(df_train, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
     df = df_train
-
-del df_train
+    del df_train
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
