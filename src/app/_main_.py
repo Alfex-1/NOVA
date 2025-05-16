@@ -1033,8 +1033,13 @@ if uploaded_file_test is not None:
 
 if df_train is not None:
     st.dataframe(df_train.head(40), use_container_width=True)
+    st.write("TYPE df_train :", type(df_train))
+    st.write("ISINSTANCE DataFrame ?", isinstance(df_train, pd.DataFrame))
+    st.write("CONTENU :", df_train if len(df_train.columns) < 20 else df_train.iloc[:, :5])
     df = df_train.copy()
     st.dataframe(df.head(40), use_container_width=True)
+else:
+    st.error("df_train est None ici.")
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
