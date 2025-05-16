@@ -1086,7 +1086,7 @@ if df is not None:
         
         if not use_target:
             if target and target in df.columns:
-                if df_test is None:
+                if df_test is None and not split_data:
                     df_to_wrang = df.drop(columns=target)
                 else:
                     df_to_wrang = df_train.drop(columns=target)
