@@ -1517,7 +1517,7 @@ if valid_wrang:
                 
                 # Préparer le téléchargement du dossier zip contenant les deux fichiers
                 st.write("### Aperçu des données traitées (entraînement) :")                
-                if df.shape[0] <= 100000 and df.shape[1] <= 30:
+                if df.shape[0] <= 10000 and df.shape[1] <= 30:
                     st.dataframe(df_train_scaled, use_container_width=True, hide_index=True)
                 else:
                     st.warning("Le DataFrame est trop volumineux pour être affiché.")
@@ -1693,7 +1693,7 @@ if valid_wrang:
             
         # Afficher l'aperçu des données traitées seulement si raisonnable
         st.write("### Aperçu des données traitées :")
-        if df.shape[0] <= 100000 and df.shape[1] <= 30:
+        if df.shape[0] <= 10000 and df.shape[1] <= 30:
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.warning("Le DataFrame est trop volumineux pour être affiché.")
