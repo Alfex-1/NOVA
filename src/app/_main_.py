@@ -1035,7 +1035,6 @@ if df_train is not None:
     st.dataframe(df_train.head(40), use_container_width=True)
     df = df_train.copy()
     st.dataframe(df.head(40), use_container_width=True)
-    del df_train
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
