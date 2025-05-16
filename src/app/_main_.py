@@ -1,6 +1,7 @@
 # Imports
 import numpy as np
 import pandas as pd
+import polars as pl
 from matplotlib import pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -20,7 +21,7 @@ import lightgbm as lgb
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import SuccessiveHalvingPruner
-from sklearn.metrics import confusion_matrix, get_scorer
+from sklearn.metrics import confusion_matrix, f1_score, mean_absolute_error, mean_absolute_percentage_error
 import io
 from io import BytesIO
 import os
@@ -32,13 +33,23 @@ from lime.lime_tabular import LimeTabularExplainer
 import streamlit.components.v1 as components
 
 def load_file(file_data):
+    """
+    Lit un fichier CSV à partir d'un objet binaire en détectant automatiquement le séparateur.
+
+    Args:
+        file_data (BinaryIO): Fichier binaire téléchargé (par exemple via une interface Streamlit).
+
+    Returns:
+        pl.DataFrame | None: Un DataFrame Polars si un séparateur valide est détecté, sinon None.
+    """
+
     byte_data = file_data.read()
     separators = [";", ",", "\t"]
     detected_sep = None
 
     for sep in separators:
         try:
-            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            tmp_df = pl.read_csv(BytesIO(byte_data), separator=sep, n_rows=20)
             if tmp_df.shape[1] > 1:
                 detected_sep = sep
                 break
@@ -46,7 +57,7 @@ def load_file(file_data):
             continue
 
     if detected_sep is not None:
-        return pd.read_csv(BytesIO(byte_data), sep=detected_sep)
+        return pl.read_csv(BytesIO(byte_data), separator=detected_sep)
     else:
         return None
 
@@ -197,32 +208,32 @@ class ParametricImputer:
             raise ValueError("L'entrée doit être une série pandas.")
         data = X.dropna()
 
-        # Fit normal
+        p_values = {}
+
+        # Normale
         mu, sigma = stats.norm.fit(data)
         _, p_norm = stats.kstest(data, 'norm', args=(mu, sigma))
+        p_values['norm'] = p_norm
 
-        # Fit uniforme
+        # Uniforme
         a, b = np.min(data), np.max(data)
         _, p_unif = stats.kstest(data, 'uniform', args=(a, b - a))
+        p_values['uniform'] = p_unif
 
-        # Fit exponentielle
-        lambda_hat = 1 / data.mean()  # paramètre de la loi exponentielle
+        # Exponentielle
+        lambda_hat = 1 / data.mean()
         _, p_exp = stats.kstest(data, 'expon', args=(0, lambda_hat))
+        p_values['expon'] = p_exp
 
-        # Fit log-normale
-        log_data = np.log(data)
-        mu_log, sigma_log = stats.norm.fit(log_data)
-        _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+        # Log-normale (que si data > 0)
+        if (data > 0).all():
+            log_data = np.log(data)
+            mu_log, sigma_log = stats.norm.fit(log_data)
+            _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+            p_values['lognorm'] = p_lognorm
 
-        # Choix : distribution avec le plus grand p-value
-        p_values = {
-            'norm': p_norm,
-            'uniform': p_unif,
-            'expon': p_exp,
-            'lognorm': p_lognorm
-        }
-
-        best_dist = max(p_values, key=p_values.get)  # On choisit la distribution avec la plus grande p-value
+        # Meilleure distribution = max p-value
+        best_dist = max(p_values, key=p_values.get)
 
         if best_dist == 'norm':
             self.distribution = 'norm'
@@ -233,12 +244,15 @@ class ParametricImputer:
         elif best_dist == 'expon':
             self.distribution = 'expon'
             self.params = {'lambda': lambda_hat}
-        else:  # log-normale
+        elif best_dist == 'lognorm':
             self.distribution = 'lognorm'
             self.params = {'mu': mu_log, 'sigma': sigma_log}
+        else:
+            raise RuntimeError("Distribution sélectionnée non reconnue.")
 
         self.fitted = True
         return self
+
 
     def sample(self, size):
         if not self.fitted:
@@ -249,6 +263,10 @@ class ParametricImputer:
             return rng.normal(loc=self.params['mu'], scale=self.params['sigma'], size=size)
         elif self.distribution == 'uniform':
             return rng.uniform(low=self.params['a'], high=self.params['b'], size=size)
+        elif self.distribution == 'lognorm':
+            return rng.lognormal(mean=self.params['mu'], sigma=self.params['sigma'], size=size)
+        elif  self.distribution == 'expon':
+            return rng.exponential(scale=1 / self.params['lambda'], size=size)
         else:
             raise RuntimeError("Distribution non reconnue.")
 
@@ -294,7 +312,7 @@ class MultiParametricImputer:
         return df_copy
 
     
-def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
+def impute_from_supervised(df_train, df_test, cols_to_impute):
     """
     Impute les valeurs manquantes des colonnes sélectionnées en utilisant des modèles supervisés (arbres de décision).
 
@@ -305,7 +323,6 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
         df_train (pd.DataFrame): Jeu de données d'entraînement contenant des valeurs manquantes.
         df_test (pd.DataFrame ou None): Jeu de données de test contenant des valeurs manquantes. Peut être None si indisponible.
         cols_to_impute (list of str): Liste des noms de colonnes à imputer.
-        cv (int, optionnel): Nombre de plis pour la validation croisée utilisée pour évaluer la performance des modèles. Par défaut à 5.
 
     Returns:
         pd.DataFrame: Jeu de données d'entraînement mis à jour avec les imputations.
@@ -356,22 +373,54 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
             y_fit = le_target.fit_transform(y_fit.astype(str))
 
         model.fit(X_fit, y_fit)
+        
+        # --- Détermine le nombre de splits CV ---
+        if target_is_categorical:
+            class_counts = pd.Series(y_fit).value_counts()
+            if class_counts.min() < 5:
+                cv = 1
+            else:
+                cv = 5
+        else:
+            cv = 5 if len(y_fit) >= 5 else 1
 
         # --- SCORING ---
         if target_is_categorical:
-            score_array = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='accuracy')
-            score_value = round(np.mean(score_array)*100, 2)
-            metric_used = 'accuracy (%)'
+            if cv > 1:
+                f1_macro = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='f1_macro')
+                score_value = round(np.mean(f1_macro)*100, 2)
+            else:
+                model.fit(X_fit, y_fit)
+                y_pred = model.predict(X_fit)
+                score_value = round(f1_score(y_fit, y_pred, average='weighted')*100, 2)
+            metric_used = 'F1-score (weighted) (%)'
         else:
-            rmse_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_root_mean_squared_error')
-            score_value = round(np.mean(rmse_scores), 2)
-            metric_used = 'rmse'
+            use_mape = not np.any(y_fit == 0)
+            if use_mape:
+                if cv > 1:
+                    mae_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_mean_absolute_percentage_error')
+                    score_value = round(np.mean(mae_scores), 2)
+                else:
+                    model.fit(X_fit, y_fit)
+                    y_pred = model.predict(X_fit)
+                    score_value = round(mean_absolute_percentage_error(y_fit, y_pred)*100, 2)
+                metric_used = 'Mean Absolute Percentage Error (%)'
+            else:
+                if cv > 1:
+                    mae_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_mean_absolute_error')
+                    score_value = round(np.mean(mae_scores), 4)
+                else:
+                    model.fit(X_fit, y_fit)
+                    y_pred = model.predict(X_fit)
+                    score_value = round(mean_absolute_error(y_fit, y_pred), 4)
+                metric_used = 'Mean Absolute Error'
 
         scores.append({
             'feature': target_col,
             'metric': metric_used,
             'score': score_value
         })
+        scores_df = pd.DataFrame(scores)
 
         # --- IMPUTATION ---
         if X_missing_train is not None:
@@ -386,11 +435,9 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
                 preds_test = le_target.inverse_transform(preds_test)
             df_test.loc[df_test[target_col].isna(), target_col] = preds_test
 
-    scores_df = pd.DataFrame(scores)
-
     return df_train, df_test, scores_df
 
-def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None, cv=5):
+def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None):
     """
     Imputation avancée des valeurs manquantes :
     - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
@@ -401,7 +448,6 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         df_test (pd.DataFrame, optional): DataFrame de test
         prop_nan (pd.DataFrame): Table des proportions de NaN et types des variables
         corr_mat (pd.DataFrame): Matrice de corrélation (%) des patterns de NaN
-        cv (int): Nombre de folds pour la cross-validation de l'imputation supervisée
         target (str, optional): Nom de la variable cible à exclure pendant l'imputation
 
     Returns:
@@ -472,24 +518,12 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
                 'feature': feature,
                 'method': 'Parametric Imputation',
                 'distribution': parametric_imputer.imputers[feature].distribution,
-                'params': parametric_imputer.imputers[feature].params,
-                'base': 'train'
-            })
-        if df_test is not None:
-            for feature in low_corr_features:
-                imputation_report.append({
-                    'feature': feature,
-                    'method': 'Parametric Imputation',
-                    'distribution': parametric_imputer.imputers[feature].distribution,
-                    'params': parametric_imputer.imputers[feature].params,
-                    'base': 'test'
-                })
+                'params': parametric_imputer.imputers[feature].params})
 
     # --- Imputation supervisée ---
     if other_features:
         df_train, df_test, scores_supervised = impute_from_supervised(
-            df_train, df_test, other_features, cv=cv
-        )
+            df_train, df_test, other_features)
         if df_test is not None and (df_test is df_train):
             df_test = None
 
@@ -497,16 +531,7 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         for feature in other_features:
             imputation_report.append({
                 'feature': feature,
-                'method': 'Supervised Imputation (Decision Tree)',
-                'base': 'train'
-            })
-        if df_test is not None:
-            for feature in other_features:
-                imputation_report.append({
-                    'feature': feature,
-                    'method': 'Supervised Imputation (Decision Tree)',
-                    'base': 'test'
-                })
+                'method': 'Supervised Imputation (Decision Tree)'})
 
     else:
         scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
@@ -521,7 +546,6 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
     imputation_report = pd.DataFrame(imputation_report)
 
     return df_train, df_test, scores_supervised, imputation_report
-
 
 def detect_and_winsorize(df_train: pd.DataFrame, df_test: pd.DataFrame = None, target: str = None, contamination: float = 0.01):
     """
@@ -934,6 +958,28 @@ def instance_model(index, df, task):
     
     return model
 
+def heatmap_corr(corr_mat):
+    mask = np.triu(np.ones_like(corr_mat, dtype=bool))
+
+    n_vars = corr_mat.shape[0]
+    figsize = (max(8, n_vars*1.5), max(6, n_vars * 0.8))
+
+    plt.figure(figsize=figsize)
+    heatmap = sns.heatmap(
+        round(corr_mat, 1),
+        mask=mask,
+        annot=True,
+        cmap='coolwarm',
+        annot_kws={"size": max(6, n_vars)},
+        cbar_kws={'shrink': 0.8}
+    )
+    heatmap.collections[0].colorbar.ax.tick_params(labelsize=max(8, 1.25*n_vars))
+    plt.xticks(fontsize=max(6, int(n_vars * 0.85)), rotation=90)
+    plt.yticks(fontsize=max(6, int(n_vars * 0.85)), rotation=0)
+    plt.tight_layout()
+    
+    return plt
+
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
 
@@ -1286,7 +1332,7 @@ if valid_wrang:
             df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
         
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
@@ -1419,10 +1465,12 @@ if valid_wrang:
         
             with st.expander("Diagnostic des données", expanded=False):
                 st.write("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
-                st.dataframe(corr_mat_train, use_container_width=True)
+                plt = heatmap_corr(corr_mat_train)
+                st.pyplot(plt, use_container_width=True)
 
                 st.write("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
-                st.dataframe(corr_mat_test, use_container_width=True)
+                plt = heatmap_corr(corr_mat_test)
+                st.pyplot(plt, use_container_width=True)
 
                 st.write("**Proportion de valeurs manquantes par variable (train), en % :**")
                 st.dataframe(prop_nan_train.sort_values(by='NaN proportion', ascending=False), use_container_width=True)
@@ -1500,7 +1548,7 @@ if valid_wrang:
             df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
     
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
@@ -1606,7 +1654,8 @@ if valid_wrang:
             
             with st.expander("Diagnostic des données", expanded=False):
                 st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
-                st.dataframe(corr_mat, use_container_width=True)
+                plt = heatmap_corr(corr_mat)
+                st.pyplot(plt, use_container_width=True)
                 
                 st.write("**Proportion de valeurs manquantes par variable (en %) :**")
                 st.dataframe(prop_nan.sort_values(by='NaN Proportion', ascending=False), use_container_width=True)

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import polars as pl
 from matplotlib import pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -19,7 +20,7 @@ import lightgbm as lgb
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import SuccessiveHalvingPruner
-from sklearn.metrics import confusion_matrix, get_scorer
+from sklearn.metrics import confusion_matrix, f1_score, mean_absolute_error, mean_absolute_percentage_error
 import io
 from io import BytesIO
 import zipfile
@@ -27,13 +28,22 @@ import shap
 from lime.lime_tabular import LimeTabularExplainer
 
 def load_file(file_data):
+    """
+    Lit un fichier CSV à partir d'un objet binaire en détectant automatiquement le séparateur.
+
+    Args:
+        file_data (BinaryIO): Fichier binaire téléchargé (par exemple via une interface Streamlit).
+
+    Returns:
+        pl.DataFrame | None: Un DataFrame Polars si un séparateur valide est détecté, sinon None.
+    """
     byte_data = file_data.read()
     separators = [";", ",", "\t"]
     detected_sep = None
 
     for sep in separators:
         try:
-            tmp_df = pd.read_csv(BytesIO(byte_data), sep=sep, engine="python", nrows=20)
+            tmp_df = pl.read_csv(BytesIO(byte_data), separator=sep, n_rows=20)
             if tmp_df.shape[1] > 1:
                 detected_sep = sep
                 break
@@ -41,7 +51,7 @@ def load_file(file_data):
             continue
 
     if detected_sep is not None:
-        return pd.read_csv(BytesIO(byte_data), sep=detected_sep)
+        return pl.read_csv(BytesIO(byte_data), separator=detected_sep)
     else:
         return None
 
@@ -192,32 +202,32 @@ class ParametricImputer:
             raise ValueError("L'entrée doit être une série pandas.")
         data = X.dropna()
 
-        # Fit normal
+        p_values = {}
+
+        # Normale
         mu, sigma = stats.norm.fit(data)
         _, p_norm = stats.kstest(data, 'norm', args=(mu, sigma))
+        p_values['norm'] = p_norm
 
-        # Fit uniforme
+        # Uniforme
         a, b = np.min(data), np.max(data)
         _, p_unif = stats.kstest(data, 'uniform', args=(a, b - a))
+        p_values['uniform'] = p_unif
 
-        # Fit exponentielle
-        lambda_hat = 1 / data.mean()  # paramètre de la loi exponentielle
+        # Exponentielle
+        lambda_hat = 1 / data.mean()
         _, p_exp = stats.kstest(data, 'expon', args=(0, lambda_hat))
+        p_values['expon'] = p_exp
 
-        # Fit log-normale
-        log_data = np.log(data)
-        mu_log, sigma_log = stats.norm.fit(log_data)
-        _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+        # Log-normale (que si data > 0)
+        if (data > 0).all():
+            log_data = np.log(data)
+            mu_log, sigma_log = stats.norm.fit(log_data)
+            _, p_lognorm = stats.kstest(data, 'lognorm', args=(sigma_log, 0, np.exp(mu_log)))
+            p_values['lognorm'] = p_lognorm
 
-        # Choix : distribution avec le plus grand p-value
-        p_values = {
-            'norm': p_norm,
-            'uniform': p_unif,
-            'expon': p_exp,
-            'lognorm': p_lognorm
-        }
-
-        best_dist = max(p_values, key=p_values.get)  # On choisit la distribution avec la plus grande p-value
+        # Meilleure distribution = max p-value
+        best_dist = max(p_values, key=p_values.get)
 
         if best_dist == 'norm':
             self.distribution = 'norm'
@@ -228,12 +238,15 @@ class ParametricImputer:
         elif best_dist == 'expon':
             self.distribution = 'expon'
             self.params = {'lambda': lambda_hat}
-        else:  # log-normale
+        elif best_dist == 'lognorm':
             self.distribution = 'lognorm'
             self.params = {'mu': mu_log, 'sigma': sigma_log}
+        else:
+            raise RuntimeError("Distribution sélectionnée non reconnue.")
 
         self.fitted = True
         return self
+
 
     def sample(self, size):
         if not self.fitted:
@@ -244,6 +257,10 @@ class ParametricImputer:
             return rng.normal(loc=self.params['mu'], scale=self.params['sigma'], size=size)
         elif self.distribution == 'uniform':
             return rng.uniform(low=self.params['a'], high=self.params['b'], size=size)
+        elif self.distribution == 'lognorm':
+            return rng.lognormal(mean=self.params['mu'], sigma=self.params['sigma'], size=size)
+        elif  self.distribution == 'expon':
+            return rng.exponential(scale=1 / self.params['lambda'], size=size)
         else:
             raise RuntimeError("Distribution non reconnue.")
 
@@ -289,7 +306,7 @@ class MultiParametricImputer:
         return df_copy
 
     
-def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
+def impute_from_supervised(df_train, df_test, cols_to_impute):
     """
     Impute les valeurs manquantes des colonnes sélectionnées en utilisant des modèles supervisés (arbres de décision).
 
@@ -300,7 +317,6 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
         df_train (pd.DataFrame): Jeu de données d'entraînement contenant des valeurs manquantes.
         df_test (pd.DataFrame ou None): Jeu de données de test contenant des valeurs manquantes. Peut être None si indisponible.
         cols_to_impute (list of str): Liste des noms de colonnes à imputer.
-        cv (int, optionnel): Nombre de plis pour la validation croisée utilisée pour évaluer la performance des modèles. Par défaut à 5.
 
     Returns:
         pd.DataFrame: Jeu de données d'entraînement mis à jour avec les imputations.
@@ -351,22 +367,54 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
             y_fit = le_target.fit_transform(y_fit.astype(str))
 
         model.fit(X_fit, y_fit)
+        
+        # --- Détermine le nombre de splits CV ---
+        if target_is_categorical:
+            class_counts = pd.Series(y_fit).value_counts()
+            if class_counts.min() < 5:
+                cv = 1
+            else:
+                cv = 5
+        else:
+            cv = 5 if len(y_fit) >= 5 else 1
 
         # --- SCORING ---
         if target_is_categorical:
-            score_array = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='accuracy')
-            score_value = round(np.mean(score_array)*100, 2)
-            metric_used = 'accuracy (%)'
+            if cv > 1:
+                f1_macro = cross_val_score(model, X_fit, y_fit, cv=cv, scoring='f1_macro')
+                score_value = round(np.mean(f1_macro)*100, 2)
+            else:
+                model.fit(X_fit, y_fit)
+                y_pred = model.predict(X_fit)
+                score_value = round(f1_score(y_fit, y_pred, average='weighted')*100, 2)
+            metric_used = 'F1-score (weighted) (%)'
         else:
-            rmse_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_root_mean_squared_error')
-            score_value = round(np.mean(rmse_scores), 2)
-            metric_used = 'rmse'
+            use_mape = not np.any(y_fit == 0)
+            if use_mape:
+                if cv > 1:
+                    mae_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_mean_absolute_percentage_error')
+                    score_value = round(np.mean(mae_scores), 2)
+                else:
+                    model.fit(X_fit, y_fit)
+                    y_pred = model.predict(X_fit)
+                    score_value = round(mean_absolute_percentage_error(y_fit, y_pred)*100, 2)
+                metric_used = 'Mean Absolute Percentage Error (%)'
+            else:
+                if cv > 1:
+                    mae_scores = -cross_val_score(model, X_fit, y_fit, cv=cv, scoring='neg_mean_absolute_error')
+                    score_value = round(np.mean(mae_scores), 4)
+                else:
+                    model.fit(X_fit, y_fit)
+                    y_pred = model.predict(X_fit)
+                    score_value = round(mean_absolute_error(y_fit, y_pred), 4)
+                metric_used = 'Mean Absolute Error'
 
         scores.append({
             'feature': target_col,
             'metric': metric_used,
             'score': score_value
         })
+        scores_df = pd.DataFrame(scores)
 
         # --- IMPUTATION ---
         if X_missing_train is not None:
@@ -381,11 +429,9 @@ def impute_from_supervised(df_train, df_test, cols_to_impute, cv=5):
                 preds_test = le_target.inverse_transform(preds_test)
             df_test.loc[df_test[target_col].isna(), target_col] = preds_test
 
-    scores_df = pd.DataFrame(scores)
-
     return df_train, df_test, scores_df
 
-def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None, cv=5):
+def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, corr_mat=None):
     """
     Imputation avancée des valeurs manquantes :
     - Variables numériques faiblement corrélées => MultiParametricImputer (échantillonnage paramétrique normal)
@@ -396,7 +442,6 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         df_test (pd.DataFrame, optional): DataFrame de test
         prop_nan (pd.DataFrame): Table des proportions de NaN et types des variables
         corr_mat (pd.DataFrame): Matrice de corrélation (%) des patterns de NaN
-        cv (int): Nombre de folds pour la cross-validation de l'imputation supervisée
         target (str, optional): Nom de la variable cible à exclure pendant l'imputation
 
     Returns:
@@ -467,24 +512,12 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
                 'feature': feature,
                 'method': 'Parametric Imputation',
                 'distribution': parametric_imputer.imputers[feature].distribution,
-                'params': parametric_imputer.imputers[feature].params,
-                'base': 'train'
-            })
-        if df_test is not None:
-            for feature in low_corr_features:
-                imputation_report.append({
-                    'feature': feature,
-                    'method': 'Parametric Imputation',
-                    'distribution': parametric_imputer.imputers[feature].distribution,
-                    'params': parametric_imputer.imputers[feature].params,
-                    'base': 'test'
-                })
+                'params': parametric_imputer.imputers[feature].params})
 
     # --- Imputation supervisée ---
     if other_features:
         df_train, df_test, scores_supervised = impute_from_supervised(
-            df_train, df_test, other_features, cv=cv
-        )
+            df_train, df_test, other_features)
         if df_test is not None and (df_test is df_train):
             df_test = None
 
@@ -492,16 +525,7 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         for feature in other_features:
             imputation_report.append({
                 'feature': feature,
-                'method': 'Supervised Imputation (Decision Tree)',
-                'base': 'train'
-            })
-        if df_test is not None:
-            for feature in other_features:
-                imputation_report.append({
-                    'feature': feature,
-                    'method': 'Supervised Imputation (Decision Tree)',
-                    'base': 'test'
-                })
+                'method': 'Supervised Imputation (Decision Tree)'})
 
     else:
         scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
@@ -929,30 +953,53 @@ def instance_model(index, df, task):
     
     return model
 
-df = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\train_clean.csv", sep=',')
-df_test = None
+def heatmap_corr(corr_mat):
+    mask = np.triu(np.ones_like(corr_mat, dtype=bool))
+
+    n_vars = corr_mat.shape[0]
+    figsize = (max(8, n_vars*1.5), max(6, n_vars * 0.8))
+
+    plt.figure(figsize=figsize)
+    heatmap = sns.heatmap(
+        round(corr_mat, 1),
+        mask=mask,
+        annot=True,
+        cmap='coolwarm',
+        annot_kws={"size": max(6, n_vars)},
+        cbar_kws={'shrink': 0.8}
+    )
+    heatmap.collections[0].colorbar.ax.tick_params(labelsize=max(8, 1.25*n_vars))
+    plt.xticks(fontsize=max(6, int(n_vars * 0.85)), rotation=90)
+    plt.yticks(fontsize=max(6, int(n_vars * 0.85)), rotation=0)
+    plt.tight_layout()
+    
+    return plt
+
+df = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\train.csv", sep=',')
+df_test = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\test.csv", sep=',')
+
 
 # Tâche à accomplir
-to_do = "model"
+to_do = "wrang"
 target = "SalePrice"
 
 # Paramètres de la préparation des données
 use_target = False
-split_data = True
+split_data = False
 train_size = 80
 drop_dupli = True
 
-drop_columns = ['id', 'Podcast_Name', 'Episode_Title']
+drop_columns = ['Id']
 scale_all_data = True
 scale_method = "Robust Scaler"
-wrang_outliers = True
+wrang_outliers = False
 contamination = 'auto'
 
 have_to_encode = True
 list_binary = None
-list_nominal = ['Genre', 'Publication_Day', 'Publication_Time']
-list_ordinal = ['Episode_Sentiment']
-ordered_values = ['Negative', 'Neutral', 'Positive']
+list_nominal = df.select_dtypes(include=['object']).columns.tolist()
+list_ordinal = None
+ordered_values = None
 
 list_boxcox = None
 list_yeo = None
@@ -1038,7 +1085,7 @@ if to_do == "wrang":
             df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
         
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
@@ -1168,13 +1215,14 @@ if to_do == "wrang":
                     'Nb modalités': n_modalites
                 })
             print(pd.DataFrame(description_train))
-        
             
             print("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
-            print(corr_mat_train)
+            plt = heatmap_corr(corr_mat_train)
+            plt.show()
 
             print("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
-            print(corr_mat_test)
+            plt = heatmap_corr(corr_mat_test)
+            plt.show()
 
             print("**Proportion de valeurs manquantes par variable (train), en % :**")
             print(prop_nan_train.sort_values(by='NaN proportion', ascending=False))
@@ -1244,7 +1292,7 @@ if to_do == "wrang":
             df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat, cv=5)
+        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
     
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
@@ -1349,8 +1397,9 @@ if to_do == "wrang":
             print(pd.DataFrame(description))
             
             
-            print("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
-            print(corr_mat)
+            print("**Matrice de corrélation entre les valeurs manquantes (en %) :**")           
+            plt = heatmap_corr(corr_mat)
+            plt.show()
             
             print("**Proportion de valeurs manquantes par variable (en %) :**")
             print(prop_nan.sort_values(by='NaN Proportion', ascending=False))
@@ -1740,192 +1789,191 @@ if to_do == "model":
 
 
 
+# df = df_scaled.dropna(subset=[target])
+# X = df.drop(columns=target)
+# y = df[target]
 
-df = df_scaled.dropna(subset=[target])
-X = df.drop(columns=target)
-y = df[target]
+# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)
+# if use_loocv:
+#     cv = X_train.shape[0]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)
-if use_loocv:
-    cv = X_train.shape[0]
-
-# 6. Choisir le meilleur modèle
-results = []
-for model in models:  
-    # Déterminer chaque modèle à optimiser
-    best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
-                                                         X_train=X_train, y_train=y_train,
-                                                         cv=cv, scoring=scoring_comp,
-                                                         multi_class=multi_class,
-                                                         n_trials=5, n_jobs=-1)
+# # 6. Choisir le meilleur modèle
+# results = []
+# for model in models:  
+#     # Déterminer chaque modèle à optimiser
+#     best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
+#                                                          X_train=X_train, y_train=y_train,
+#                                                          cv=cv, scoring=scoring_comp,
+#                                                          multi_class=multi_class,
+#                                                          n_trials=5, n_jobs=-1)
     
-    # Ajouter les résultats à la liste
-    results.append({
-        'Model': model,
-        'Best Model': best_model,
-        'Best Params': best_params})
+#     # Ajouter les résultats à la liste
+#     results.append({
+#         'Model': model,
+#         'Best Model': best_model,
+#         'Best Params': best_params})
 
-# Créer un DataFrame à partir des résultats
-df_train = pd.DataFrame(results)
+# # Créer un DataFrame à partir des résultats
+# df_train = pd.DataFrame(results)
 
-df_train2=df_train.copy()        
-df_train2.set_index('Model', inplace=True)
-df_train2["Best Model"] = df_train2["Best Model"].astype(str)
-print(df_train2)
+# df_train2=df_train.copy()        
+# df_train2.set_index('Model', inplace=True)
+# df_train2["Best Model"] = df_train2["Best Model"].astype(str)
+# print(df_train2)
 
-# 7. Evaluer les meilleurs modèles
-list_models = df_train['Best Model'].tolist()
+# # 7. Evaluer les meilleurs modèles
+# list_models = df_train['Best Model'].tolist()
 
-# Dictionnaire des métriques    
-metrics_regression = {
-    "R² Score": "r2",
-    "Mean Squared Error": "neg_mean_squared_error",
-    "Root Mean Squared Error": "neg_root_mean_squared_error",
-    "Mean Absolute Error": "neg_mean_absolute_error",
-    "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
-}
+# # Dictionnaire des métriques    
+# metrics_regression = {
+#     "R² Score": "r2",
+#     "Mean Squared Error": "neg_mean_squared_error",
+#     "Root Mean Squared Error": "neg_root_mean_squared_error",
+#     "Mean Absolute Error": "neg_mean_absolute_error",
+#     "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
+# }
 
-metrics_classification = {
-    "Accuracy": "accuracy",
-    "F1 Score (Weighted)": "f1_weighted",
-    "Precision (Weighted)": "precision_weighted",
-    "Recall (Weighted)": "recall_weighted"
-}
+# metrics_classification = {
+#     "Accuracy": "accuracy",
+#     "F1 Score (Weighted)": "f1_weighted",
+#     "Precision (Weighted)": "precision_weighted",
+#     "Recall (Weighted)": "recall_weighted"
+# }
 
-if task == "Regression":
-    scoring_dict = metrics_regression
-else:
-    scoring_dict = metrics_classification
+# if task == "Regression":
+#     scoring_dict = metrics_regression
+# else:
+#     scoring_dict = metrics_classification
 
-all_results = []    
-for model in list_models:
-    mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative = evaluate_and_decompose(
-        estimator=model,  # Ton modèle
-        X=X_test,              # Données d'entraînement
-        y=y_test,              # Cibles
-        scoring_dict=scoring_dict,  # Dictionnaire des métriques
-        task=task,  # Ou "Regression" si tu utilises un modèle de régression
-        cv=cv,  # Nombre de splits pour la validation croisée
-        random_seed=42  # Graine pour la reproductibilité
-    )
+# all_results = []    
+# for model in list_models:
+#     mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative = evaluate_and_decompose(
+#         estimator=model,  # Ton modèle
+#         X=X_test,              # Données d'entraînement
+#         y=y_test,              # Cibles
+#         scoring_dict=scoring_dict,  # Dictionnaire des métriques
+#         task=task,  # Ou "Regression" si tu utilises un modèle de régression
+#         cv=cv,  # Nombre de splits pour la validation croisée
+#         random_seed=42  # Graine pour la reproductibilité
+#     )
     
-    all_results.append({
-        'Model': str(model),
-        'Scores': mean_scores,
-        'Std Scores': std_scores,
-        'Avg Expected Loss': avg_expected_loss,
-        'Avg Bias': avg_bias,
-        'Avg Variance': avg_var,
-        'Bias Relative': bias_relative,
-        'Variance Relative': var_relative
-    })
+#     all_results.append({
+#         'Model': str(model),
+#         'Scores': mean_scores,
+#         'Std Scores': std_scores,
+#         'Avg Expected Loss': avg_expected_loss,
+#         'Avg Bias': avg_bias,
+#         'Avg Variance': avg_var,
+#         'Bias Relative': bias_relative,
+#         'Variance Relative': var_relative
+#     })
     
-final_results_df = pd.DataFrame(all_results)
+# final_results_df = pd.DataFrame(all_results)
 
-# 9. Afficher la matrice de confusion  
-if task=='Classification':
-    for index, model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train2, task)
-        model.fit(X_train, y_train)
+# # 9. Afficher la matrice de confusion  
+# if task=='Classification':
+#     for index, model in df_score['Best Model'].items():
+#         model = instance_model(idx, df_train2, task)
+#         model.fit(X_train, y_train)
         
-        y_pred = model.predict(X_test)
+#         y_pred = model.predict(X_test)
         
-        # Si multi_classe est True, on génère une matrice de confusion adaptée
-        if multi_class:
-            cm = confusion_matrix(y_test, y_pred)
+#         # Si multi_classe est True, on génère une matrice de confusion adaptée
+#         if multi_class:
+#             cm = confusion_matrix(y_test, y_pred)
             
-            # Affichage de la matrice de confusion sous forme de heatmap
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=[f"Class {i}" for i in range(cm.shape[1])], 
-                        yticklabels=[f"Class {i}" for i in range(cm.shape[0])])
-            plt.title(f'Confusion Matrix - {index}')
-            plt.xlabel('Predicted')
-            plt.ylabel('True')
-            plt.show()
+#             # Affichage de la matrice de confusion sous forme de heatmap
+#             plt.figure(figsize=(8, 6))
+#             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+#                         xticklabels=[f"Class {i}" for i in range(cm.shape[1])], 
+#                         yticklabels=[f"Class {i}" for i in range(cm.shape[0])])
+#             plt.title(f'Confusion Matrix - {index}')
+#             plt.xlabel('Predicted')
+#             plt.ylabel('True')
+#             plt.show()
             
-        else:
-            # Si c'est un problème binaire
-            cm = confusion_matrix(y_test, y_pred)
+#         else:
+#             # Si c'est un problème binaire
+#             cm = confusion_matrix(y_test, y_pred)
             
-            # Affichage de la matrice de confusion sous forme de heatmap
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                        xticklabels=["Class 0", "Class 1"], 
-                        yticklabels=["Class 0", "Class 1"])
-            plt.title('Confusion Matrix (Binary)')
-            plt.xlabel('Predicted')
-            plt.ylabel('True')
-            plt.show()
+#             # Affichage de la matrice de confusion sous forme de heatmap
+#             plt.figure(figsize=(8, 6))
+#             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+#                         xticklabels=["Class 0", "Class 1"], 
+#                         yticklabels=["Class 0", "Class 1"])
+#             plt.title('Confusion Matrix (Binary)')
+#             plt.xlabel('Predicted')
+#             plt.ylabel('True')
+#             plt.show()
             
-# Feature importance
-for index, mdl in df_score['Best Model'].items():
-    model = instance_model(idx, df_train2, task)
-    model.fit(X_train, y_train)
+# # Feature importance
+# for index, mdl in df_score['Best Model'].items():
+#     model = instance_model(idx, df_train2, task)
+#     model.fit(X_train, y_train)
     
-    # Calculer l'importance des features par permutation
-    result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
+#     # Calculer l'importance des features par permutation
+#     result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
 
-    # Extraire l'importance moyenne des features
-    importances = result.importances_mean
-    std_importances = result.importances_std
+#     # Extraire l'importance moyenne des features
+#     importances = result.importances_mean
+#     std_importances = result.importances_std
 
-    # Trier les importances par ordre décroissant
-    sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
+#     # Trier les importances par ordre décroissant
+#     sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
 
-    # Trier les valeurs d'importance et les noms des features
-    sorted_importances = importances[sorted_idx]
-    sorted_std_importances = std_importances[sorted_idx]
-    sorted_features = X_train.columns[sorted_idx]
+#     # Trier les valeurs d'importance et les noms des features
+#     sorted_importances = importances[sorted_idx]
+#     sorted_std_importances = std_importances[sorted_idx]
+#     sorted_features = X_train.columns[sorted_idx]
 
-    # Créer le graphique
-    plt.figure(figsize=(5, 3))
-    plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-    plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
-    plt.xticks(fontsize=6)
-    plt.xlabel("Importance", fontsize=7)
-    plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
-    plt.gca().invert_yaxis()
-    plt.show()
+#     # Créer le graphique
+#     plt.figure(figsize=(5, 3))
+#     plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
+#     plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
+#     plt.xticks(fontsize=6)
+#     plt.xlabel("Importance", fontsize=7)
+#     plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
+#     plt.gca().invert_yaxis()
+#     plt.show()
         
-# Courbes d'apprentissage
-for index, mdl in df_score['Best Model'].items(): 
-    model = instance_model(idx, df_train2, task)       
-    train_sizes, train_scores, test_scores = learning_curve(
-        model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
-        train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
-    )
+# # Courbes d'apprentissage
+# for index, mdl in df_score['Best Model'].items(): 
+#     model = instance_model(idx, df_train2, task)       
+#     train_sizes, train_scores, test_scores = learning_curve(
+#         model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
+#         train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
+#     )
 
-    train_scores_mean = np.mean(train_scores, axis=1)
-    test_scores_mean = np.mean(test_scores, axis=1)
+#     train_scores_mean = np.mean(train_scores, axis=1)
+#     test_scores_mean = np.mean(test_scores, axis=1)
 
-    plt.figure(figsize=(5, 3))
-    plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
-    plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
-    plt.title(f"Learning Curve - {index}", fontsize=8)
-    plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
-    plt.ylabel("Score", fontsize=7)
-    plt.legend(loc="best", fontsize=6)
-    plt.xticks(fontsize=6)
-    plt.yticks(fontsize=6)
-    plt.show()
+#     plt.figure(figsize=(5, 3))
+#     plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
+#     plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
+#     plt.title(f"Learning Curve - {index}", fontsize=8)
+#     plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
+#     plt.ylabel("Score", fontsize=7)
+#     plt.legend(loc="best", fontsize=6)
+#     plt.xticks(fontsize=6)
+#     plt.yticks(fontsize=6)
+#     plt.show()
     
-# Analyse de drift
-drift_results = []
-for col in X.columns:
-    stat, p_value = ks_2samp(X_train[col], X_test[col])
-    drift_results.append({
-        "Feature": col,
-        "KS Statistic": round(stat, 4),
-        "p-value": round(p_value, 4),
-        "Drift détecté": "Oui" if p_value < 0.05 else "Non"
-    })
+# # Analyse de drift
+# drift_results = []
+# for col in X.columns:
+#     stat, p_value = ks_2samp(X_train[col], X_test[col])
+#     drift_results.append({
+#         "Feature": col,
+#         "KS Statistic": round(stat, 4),
+#         "p-value": round(p_value, 4),
+#         "Drift détecté": "Oui" if p_value < 0.05 else "Non"
+#     })
 
-df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
-df_drift.set_index("Feature", inplace=True)
-df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
+# df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
+# df_drift.set_index("Feature", inplace=True)
+# df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
 
-if not df_drift.empty:
-    print(df_drift)
-else:
-    print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")
+# if not df_drift.empty:
+#     print(df_drift)
+# else:
+#     print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")
