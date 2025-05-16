@@ -1046,10 +1046,10 @@ if df is not None:
         st.sidebar.subheader("Informations générales")
         
         # Supprimer les colonnes inutiles
-        drop_columns = st.sidebar.multiselect("Quelle(s) variable(s) voulez-vous supprimer instantanément ?", df.columns.to_list(), help="Sélectionnez les colonnes que vous souhaitez supprimer de la base de données.")
+        drop_columns = st.sidebar.multiselect("Quelle(s) variable(s) voulez-vous supprimer instantanément ?", df.columns, help="Sélectionnez les colonnes que vous souhaitez supprimer de la base de données.")
         
         # Demander la variable cible
-        target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns.to_list(), help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
+        target = st.sidebar.selectbox("Choisissez la variable cible de votre future modélisation", df.columns, help="Si vous n'avez pas de variable cible, choisissez une variable au harsard.")
         
         if df_test is None:
             # Demander s'il faut demander de diviser la base
