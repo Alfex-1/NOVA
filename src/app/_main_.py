@@ -1018,6 +1018,8 @@ valid_wrang=False
 # Chargement du fichier d'entraînement
 if uploaded_file_train is not None:
     df_train = load_file(uploaded_file_train)
+    if isinstance(df_train, pl.DataFrame):
+        df_train = df_train.to_pandas()
     if df_train is not None:
         valid_train = True
     else:
@@ -1026,20 +1028,16 @@ if uploaded_file_train is not None:
 # Chargement du fichier de test
 if uploaded_file_test is not None:
     df_test = load_file(uploaded_file_test)
+    if isinstance(df_test, pl.DataFrame):
+        df_test = df_test.to_pandas()
     if df_test is not None:
         valid_test = True
     else:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 
 if df_train is not None:
-    st.dataframe(df_train.head(40), use_container_width=True)
-    st.write("TYPE df_train :", type(df_train))
-    st.write("ISINSTANCE DataFrame ?", isinstance(df_train, pd.DataFrame))
-    st.write("CONTENU :", df_train if len(df_train.columns) < 20 else df_train.iloc[:, :5])
     df = df_train.copy()
-    st.dataframe(df.head(40), use_container_width=True)
-else:
-    st.error("df_train est None ici.")
+    del df_train
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
