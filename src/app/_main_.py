@@ -1031,11 +1031,8 @@ if uploaded_file_test is not None:
     else:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 
-if df_train is not None and df_test is not None:
-    df = df_train.copy()
-
-elif df_train is not None and df_test is None:
-    df = df_train.copy()
+if df_train is not None:
+    df = df_train
 
 del df_train
 
