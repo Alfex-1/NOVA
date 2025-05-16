@@ -1516,8 +1516,11 @@ if valid_wrang:
                         zip_file.writestr("test.csv", csv_buffer_test.getvalue())
                 
                 # Préparer le téléchargement du dossier zip contenant les deux fichiers
-                st.write("### Aperçu des données traitées :")
-                st.dataframe(df_train_scaled, use_container_width=True, hide_index=True)
+                st.write("### Aperçu des données traitées (entraînement) :")                
+                if df.shape[0] <= 100000 and df.shape[1] <= 30:
+                    st.dataframe(df_train_scaled, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Le DataFrame est trop volumineux pour être affiché.")
 
                 # Télécharger le fichier zip contenant les deux bases
                 st.download_button(
@@ -1688,9 +1691,12 @@ if valid_wrang:
             df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
             
-            # Afficher l'aperçu des données traitées
-            st.write("### Aperçu des données traitées :")
-            st.dataframe(df_scaled, use_container_width=True, hide_index=True)
+        # Afficher l'aperçu des données traitées seulement si raisonnable
+        st.write("### Aperçu des données traitées :")
+        if df.shape[0] <= 100000 and df.shape[1] <= 30:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Le DataFrame est trop volumineux pour être affiché.")
 
             # Afficher le bouton pour télécharger le fichier
             st.download_button(
