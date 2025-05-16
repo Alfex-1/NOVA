@@ -1032,10 +1032,12 @@ if uploaded_file_test is not None:
         st.warning("Échec de la détection du séparateur pour le fichier de test. Vérifiez le format du fichier.")
 
 if df_train is not None and df_test is not None:
-    df = df_train
-    del df_train  # pour éviter toute confusion
+    df = df_train.copy()
+
 elif df_train is not None and df_test is None:
-    df = df_train
+    df = df_train.copy()
+
+del df_train
 
 # Sidebar pour la configuration de l'utilisateur    
 if df is not None:
@@ -1086,13 +1088,15 @@ if df is not None:
         
         if not use_target:
             if target and target in df.columns:
-                if df_test is None and not split_data:
-                    df_to_wrang = df.drop(columns=target)
-                else:
+                if split_data:
                     df_to_wrang = df_train.drop(columns=target)
+                else:
+                    df_to_wrang = df.drop(columns=target)
             else:
                 st.warning("La variable cible est invalide ou non définie.")
                 pb = True
+        else:
+            df_to_wrang = df if df_test is None and not split_data else df_train
         
         # Tout mettre à l'échelle directement
         scale_all_data = st.sidebar.checkbox("Voulez-vous mettre à l'échelle vos données ?")
