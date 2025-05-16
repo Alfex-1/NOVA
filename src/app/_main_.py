@@ -1084,7 +1084,10 @@ if df is not None:
         use_target = st.sidebar.checkbox("Inclure la variable cible dans la mise à l'échelle", value=False, help="Si vous avez une variable cible, ne cochez pas cette case, sinon cochez-là")
         
         if not use_target:
-            df_copy=df.copy().drop(columns=target)
+            if split_data:
+                df_to_wrang = df_train.drop(columns=target)
+            else:
+                df_to_wrang=df.drop(columns=target)
         
         # Tout mettre à l'échelle directement
         scale_all_data = st.sidebar.checkbox("Voulez-vous mettre à l'échelle vos données ?")
@@ -1103,13 +1106,9 @@ if df is not None:
                     scaler = QuantileTransformer(output_distribution='uniform')
         
         # Obtenir des dataframes distinctes selon les types des données            
-        if not use_target:
-            df_num = df_copy.select_dtypes(include=['number'])
-            df_cat = df_copy.drop(columns=drop_columns).select_dtypes(exclude=['number']) if len(drop_columns) > 0 else df_copy.select_dtypes(exclude=['number'])
-        else:
-            df_num = df.select_dtypes(include=['number'])
-            df_cat = df.drop(columns=drop_columns).select_dtypes(exclude=['number']) if len(drop_columns) > 0 else df.select_dtypes(exclude=['number'])
-        
+        df_num = df_to_wrang.select_dtypes(include=['number'])
+        df_cat = df_to_wrang.drop(columns=drop_columns).select_dtypes(exclude=['number']) if len(drop_columns) > 0 else df_to_wrang.select_dtypes(exclude=['number'])
+
         # Sélection des variables à encoder
         have_to_encode = False
         if df_cat.shape[1] > 0:
