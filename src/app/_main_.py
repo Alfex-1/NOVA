@@ -2092,4 +2092,3 @@ if valid_mod:
         st.success(f"✅ Tous les modèles ont été enregistrés dans `{save_dir}`.")
     else:
         st.error("❌ Le chemin spécifié n'existe pas ou n'est pas valide.")
- 

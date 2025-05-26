@@ -975,13 +975,13 @@ def heatmap_corr(corr_mat):
     
     return plt
 
-df = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\train.csv", sep=',')
-df_test = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\test.csv", sep=',')
-
+df = pd.read_csv(r"C:\Users\alexa\Downloads\data_processed\train.csv", sep=',')
+# df_test = pd.read_csv(r"D:\Compet Kaggle\Housing Prices prediction\test.csv", sep=',')
+df_test = None
 
 # Tâche à accomplir
-to_do = "wrang"
-target = "SalePrice"
+to_do = "model"
+target = "Listening_Time_minutes"
 
 # Paramètres de la préparation des données
 use_target = False
@@ -989,7 +989,7 @@ split_data = False
 train_size = 80
 drop_dupli = True
 
-drop_columns = ['Id']
+drop_columns = None
 scale_all_data = True
 scale_method = "Robust Scaler"
 wrang_outliers = False
@@ -1782,198 +1782,3 @@ if to_do == "model":
         print(df_drift)
     else:
         print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")            
-            
-
-
-
-
-
-
-# df = df_scaled.dropna(subset=[target])
-# X = df.drop(columns=target)
-# y = df[target]
-
-# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)
-# if use_loocv:
-#     cv = X_train.shape[0]
-
-# # 6. Choisir le meilleur modèle
-# results = []
-# for model in models:  
-#     # Déterminer chaque modèle à optimiser
-#     best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
-#                                                          X_train=X_train, y_train=y_train,
-#                                                          cv=cv, scoring=scoring_comp,
-#                                                          multi_class=multi_class,
-#                                                          n_trials=5, n_jobs=-1)
-    
-#     # Ajouter les résultats à la liste
-#     results.append({
-#         'Model': model,
-#         'Best Model': best_model,
-#         'Best Params': best_params})
-
-# # Créer un DataFrame à partir des résultats
-# df_train = pd.DataFrame(results)
-
-# df_train2=df_train.copy()        
-# df_train2.set_index('Model', inplace=True)
-# df_train2["Best Model"] = df_train2["Best Model"].astype(str)
-# print(df_train2)
-
-# # 7. Evaluer les meilleurs modèles
-# list_models = df_train['Best Model'].tolist()
-
-# # Dictionnaire des métriques    
-# metrics_regression = {
-#     "R² Score": "r2",
-#     "Mean Squared Error": "neg_mean_squared_error",
-#     "Root Mean Squared Error": "neg_root_mean_squared_error",
-#     "Mean Absolute Error": "neg_mean_absolute_error",
-#     "Mean Absolute Percentage Error": "neg_mean_absolute_percentage_error"
-# }
-
-# metrics_classification = {
-#     "Accuracy": "accuracy",
-#     "F1 Score (Weighted)": "f1_weighted",
-#     "Precision (Weighted)": "precision_weighted",
-#     "Recall (Weighted)": "recall_weighted"
-# }
-
-# if task == "Regression":
-#     scoring_dict = metrics_regression
-# else:
-#     scoring_dict = metrics_classification
-
-# all_results = []    
-# for model in list_models:
-#     mean_scores, std_scores, avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative = evaluate_and_decompose(
-#         estimator=model,  # Ton modèle
-#         X=X_test,              # Données d'entraînement
-#         y=y_test,              # Cibles
-#         scoring_dict=scoring_dict,  # Dictionnaire des métriques
-#         task=task,  # Ou "Regression" si tu utilises un modèle de régression
-#         cv=cv,  # Nombre de splits pour la validation croisée
-#         random_seed=42  # Graine pour la reproductibilité
-#     )
-    
-#     all_results.append({
-#         'Model': str(model),
-#         'Scores': mean_scores,
-#         'Std Scores': std_scores,
-#         'Avg Expected Loss': avg_expected_loss,
-#         'Avg Bias': avg_bias,
-#         'Avg Variance': avg_var,
-#         'Bias Relative': bias_relative,
-#         'Variance Relative': var_relative
-#     })
-    
-# final_results_df = pd.DataFrame(all_results)
-
-# # 9. Afficher la matrice de confusion  
-# if task=='Classification':
-#     for index, model in df_score['Best Model'].items():
-#         model = instance_model(idx, df_train2, task)
-#         model.fit(X_train, y_train)
-        
-#         y_pred = model.predict(X_test)
-        
-#         # Si multi_classe est True, on génère une matrice de confusion adaptée
-#         if multi_class:
-#             cm = confusion_matrix(y_test, y_pred)
-            
-#             # Affichage de la matrice de confusion sous forme de heatmap
-#             plt.figure(figsize=(8, 6))
-#             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-#                         xticklabels=[f"Class {i}" for i in range(cm.shape[1])], 
-#                         yticklabels=[f"Class {i}" for i in range(cm.shape[0])])
-#             plt.title(f'Confusion Matrix - {index}')
-#             plt.xlabel('Predicted')
-#             plt.ylabel('True')
-#             plt.show()
-            
-#         else:
-#             # Si c'est un problème binaire
-#             cm = confusion_matrix(y_test, y_pred)
-            
-#             # Affichage de la matrice de confusion sous forme de heatmap
-#             plt.figure(figsize=(8, 6))
-#             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-#                         xticklabels=["Class 0", "Class 1"], 
-#                         yticklabels=["Class 0", "Class 1"])
-#             plt.title('Confusion Matrix (Binary)')
-#             plt.xlabel('Predicted')
-#             plt.ylabel('True')
-#             plt.show()
-            
-# # Feature importance
-# for index, mdl in df_score['Best Model'].items():
-#     model = instance_model(idx, df_train2, task)
-#     model.fit(X_train, y_train)
-    
-#     # Calculer l'importance des features par permutation
-#     result = permutation_importance(model, X_test, y_test, n_repeats=20, random_state=42)
-
-#     # Extraire l'importance moyenne des features
-#     importances = result.importances_mean
-#     std_importances = result.importances_std
-
-#     # Trier les importances par ordre décroissant
-#     sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
-
-#     # Trier les valeurs d'importance et les noms des features
-#     sorted_importances = importances[sorted_idx]
-#     sorted_std_importances = std_importances[sorted_idx]
-#     sorted_features = X_train.columns[sorted_idx]
-
-#     # Créer le graphique
-#     plt.figure(figsize=(5, 3))
-#     plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-#     plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
-#     plt.xticks(fontsize=6)
-#     plt.xlabel("Importance", fontsize=7)
-#     plt.title(f"Importance des variables par permutation - {index}", fontsize=8)
-#     plt.gca().invert_yaxis()
-#     plt.show()
-        
-# # Courbes d'apprentissage
-# for index, mdl in df_score['Best Model'].items(): 
-#     model = instance_model(idx, df_train2, task)       
-#     train_sizes, train_scores, test_scores = learning_curve(
-#         model, X, y, cv=cv, scoring=scoring_eval[0],  # On prend la première métrique comme référence
-#         train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
-#     )
-
-#     train_scores_mean = np.mean(train_scores, axis=1)
-#     test_scores_mean = np.mean(test_scores, axis=1)
-
-#     plt.figure(figsize=(5, 3))
-#     plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
-#     plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
-#     plt.title(f"Learning Curve - {index}", fontsize=8)
-#     plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
-#     plt.ylabel("Score", fontsize=7)
-#     plt.legend(loc="best", fontsize=6)
-#     plt.xticks(fontsize=6)
-#     plt.yticks(fontsize=6)
-#     plt.show()
-    
-# # Analyse de drift
-# drift_results = []
-# for col in X.columns:
-#     stat, p_value = ks_2samp(X_train[col], X_test[col])
-#     drift_results.append({
-#         "Feature": col,
-#         "KS Statistic": round(stat, 4),
-#         "p-value": round(p_value, 4),
-#         "Drift détecté": "Oui" if p_value < 0.05 else "Non"
-#     })
-
-# df_drift = pd.DataFrame(drift_results).sort_values("p-value", ascending=False)
-# df_drift.set_index("Feature", inplace=True)
-# df_drift = df_drift[df_drift["Drift détecté"] == "Oui"].drop(columns="Drift détecté")
-
-# if not df_drift.empty:
-#     print(df_drift)
-# else:
-#     print("Aucun drift détecté entre les distributions de la base d'apprentissage et la base de validation.")
