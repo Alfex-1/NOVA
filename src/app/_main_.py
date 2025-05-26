@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from matplotlib import pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 import seaborn as sns
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
@@ -178,11 +180,16 @@ def select_representative_categorial(df, target, threshold=0.9):
         # Création de la figure
         fig, ax = plt.subplots(figsize=(10, 8))
         pos = nx.spring_layout(G, seed=42)
-        node_colors = "#90ee90"  # lightgreen
-        edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+        edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+        norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
+        edge_cmap = plt.cm.Blues
+        edges = nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+        sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
         plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
@@ -232,11 +239,16 @@ def select_representative_numerical(df, target, threshold=0.9):
         # Création de la figure
         fig, ax = plt.subplots(figsize=(10, 8))
         pos = nx.spring_layout(G, seed=42)
-        node_colors = "#90ee90"  # lightgreen
-        edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+        edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+        norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
+        edge_cmap = plt.cm.Blues
+        edges = nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+        sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
         plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
