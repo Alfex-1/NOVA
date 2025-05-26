@@ -142,98 +142,109 @@ def build_cramers_matrix(df_cat):
 
 def select_representative_categorial(df, target, threshold=0.9):
     df_cat = df.select_dtypes(include=['object', 'category']).copy()
-    v_matrix = build_cramers_matrix(df_cat)
+    
+    if not df_cat.empty:
+        v_matrix = build_cramers_matrix(df_cat)
 
-    # Créer le graphe pondéré
-    G = nx.Graph()
-    for col in df_cat.columns:
-        G.add_node(col)
-    for i, var1 in enumerate(df_cat.columns):
-        for j, var2 in enumerate(df_cat.columns):
-            if i >= j: continue
-            v = v_matrix.loc[var1, var2]
-            if v >= threshold:
-                G.add_edge(var1, var2, weight=v)
+        # Créer le graphe pondéré
+        G = nx.Graph()
+        for col in df_cat.columns:
+            G.add_node(col)
+        for i, var1 in enumerate(df_cat.columns):
+            for j, var2 in enumerate(df_cat.columns):
+                if i >= j: continue
+                v = v_matrix.loc[var1, var2]
+                if v >= threshold:
+                    G.add_edge(var1, var2, weight=v)
 
-    # Info mutuelle
-    df_encoded = df_cat.apply(lambda col: col.astype("category").cat.codes)
-    target_type = type_of_target(df[target])
-    if "continuous" in target_type:
-        mi_scores = mutual_info_regression(df_encoded, df[target])
+        # Info mutuelle
+        df_encoded = df_cat.apply(lambda col: col.astype("category").cat.codes)
+        target_type = type_of_target(df[target])
+        if "continuous" in target_type:
+            mi_scores = mutual_info_regression(df_encoded, df[target])
+        else:
+            mi_scores = mutual_info_classif(df_encoded, df[target], discrete_features=True)
+        
+        mi_dict = dict(zip(df_cat.columns, mi_scores))
+
+        # Sélection
+        to_keep = set()
+        for component in nx.connected_components(G):
+            best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
+            to_keep.add(best)
+
+        to_drop = set(df_cat.columns) - to_keep
+
+        # Création de la figure
+        fig, ax = plt.subplots(figsize=(10, 8))
+        pos = nx.spring_layout(G, seed=42)
+        node_colors = "#90ee90"  # lightgreen
+        edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+        nx.draw_networkx_labels(G, pos, ax=ax, font_size=1  1, font_weight='bold')
+        plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+        plt.axis("off")
+        plt.tight_layout()
+        
+        return list(to_drop), fig
+    
     else:
-        mi_scores = mutual_info_classif(df_encoded, df[target], discrete_features=True)
-    
-    mi_dict = dict(zip(df_cat.columns, mi_scores))
-
-    # Sélection
-    to_keep = set()
-    for component in nx.connected_components(G):
-        best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
-        to_keep.add(best)
-
-    to_drop = set(df_cat.columns) - to_keep
-
-    # Création de la figure
-    fig, ax = plt.subplots(figsize=(10, 8))
-    pos = nx.spring_layout(G, seed=42)
-    node_colors = "#90ee90"  # lightgreen
-    edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
-    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
-    nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
-    nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
-    plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
-    plt.axis("off")
-    plt.tight_layout()
-    
-    return list(to_drop), fig
+        return [], None
 
 def select_representative_numerical(df, target, threshold=0.9):
     df_num = df.select_dtypes(include=['int', 'float']).copy()
-    corr_matrix = df_num.corr().abs()
-
-    # Construction du graphe
-    G = nx.Graph()
-    for col in df_num.columns:
-        G.add_node(col)
-    for i in range(len(corr_matrix.columns)):
-        for j in range(i + 1, len(corr_matrix.columns)):
-            var1 = corr_matrix.columns[i]
-            var2 = corr_matrix.columns[j]
-            corr_val = corr_matrix.iloc[i, j]
-            if corr_val >= threshold:
-                G.add_edge(var1, var2, weight=corr_val)
-
-    # Info mutuelle
-    y = df[target]
-    target_type = type_of_target(y)
-    if target_type in ['binary', 'multiclass', 'multiclass-multioutput']:
-        mi_scores = mutual_info_classif(df_num.fillna(0), y, discrete_features=False)
-    else:
-        mi_scores = mutual_info_regression(df_num.fillna(0), y)
-
-    mi_dict = dict(zip(df_num.columns, mi_scores))
-
-    # Sélection
-    to_keep = set()
-    for component in nx.connected_components(G):
-        best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
-        to_keep.add(best)
-
-    to_drop = set(df_num.columns) - to_keep
-
-    # Création de la figure
-    fig, ax = plt.subplots(figsize=(10, 8))
-    pos = nx.spring_layout(G, seed=42)
-    node_colors = "#90ee90"  # lightgreen
-    edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
-    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
-    nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
-    nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
-    plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
-    plt.axis("off")
-    plt.tight_layout()
     
-    return list(to_drop), fig
+    if not df_num.empty:
+    
+        corr_matrix = df_num.corr().abs()
+
+        # Construction du graphe
+        G = nx.Graph()
+        for col in df_num.columns:
+            G.add_node(col)
+        for i in range(len(corr_matrix.columns)):
+            for j in range(i + 1, len(corr_matrix.columns)):
+                var1 = corr_matrix.columns[i]
+                var2 = corr_matrix.columns[j]
+                corr_val = corr_matrix.iloc[i, j]
+                if corr_val >= threshold:
+                    G.add_edge(var1, var2, weight=corr_val)
+
+        # Info mutuelle
+        y = df[target]
+        target_type = type_of_target(y)
+        if target_type in ['binary', 'multiclass', 'multiclass-multioutput']:
+            mi_scores = mutual_info_classif(df_num.fillna(0), y, discrete_features=False)
+        else:
+            mi_scores = mutual_info_regression(df_num.fillna(0), y)
+
+        mi_dict = dict(zip(df_num.columns, mi_scores))
+
+        # Sélection
+        to_keep = set()
+        for component in nx.connected_components(G):
+            best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
+            to_keep.add(best)
+
+        to_drop = set(df_num.columns) - to_keep
+
+        # Création de la figure
+        fig, ax = plt.subplots(figsize=(10, 8))
+        pos = nx.spring_layout(G, seed=42)
+        node_colors = "#90ee90"  # lightgreen
+        edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+        nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+        plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+        plt.axis("off")
+        plt.tight_layout()
+        
+        return list(to_drop), fig
+    
+    else:
+        return [], None
 
 
 def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
