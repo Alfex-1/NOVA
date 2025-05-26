@@ -174,10 +174,17 @@ def select_representative_categorial(df, target, threshold=0.9):
     to_drop = set(df_cat.columns) - to_keep
 
     # Création de la figure
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 8))
     pos = nx.spring_layout(G, seed=42)
-    nx.draw(G, pos, with_labels=True, node_color='skyblue', edge_color='gray', node_size=1500, font_size=10, ax=ax)
-
+    node_colors = "#90ee90"  # lightgreen
+    edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
+    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
+    nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+    plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+    plt.axis("off")
+    plt.tight_layout()
+    
     return list(to_drop), fig
 
 def select_representative_numerical(df, target, threshold=0.9):
@@ -215,10 +222,17 @@ def select_representative_numerical(df, target, threshold=0.9):
     to_drop = set(df_num.columns) - to_keep
 
     # Création de la figure
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(10, 8))
     pos = nx.spring_layout(G, seed=42)
-    nx.draw(G, pos, with_labels=True, node_color='lightgreen', edge_color='gray', node_size=1500, font_size=10, ax=ax)
-
+    node_colors = "#90ee90"  # lightgreen
+    edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
+    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
+    nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+    plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+    plt.axis("off")
+    plt.tight_layout()
+    
     return list(to_drop), fig
 
 
@@ -1184,7 +1198,8 @@ if df is not None:
         # Demander si l'utilisateur veut supprimer les variables redondantes
         drop_redundant = st.sidebar.checkbox("Supprimer les variables redondantes", value=False)
         if drop_redundant:
-            threshold = st.sidebar.slider("Seuil de redondance (corrélation ou V de Cramér)", min_value=0.0, max_value=1.0, value=0.9, help="Plus la valeur est proche de 1, plus il y a une redondance entre les variables.")
+            threshold = st.sidebar.slider("Seuil de redondance (corrélation ou V de Cramér), en %", min_value=0, max_value=100, value=75, help="Plus la valeur est proche de 1, plus il y a une redondance entre les variables.")
+            threshold = threshold / 100
         
         st.sidebar.subheader("Contrôle des individus")
         
