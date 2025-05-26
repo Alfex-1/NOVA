@@ -1184,7 +1184,7 @@ if df is not None:
         # Demander si l'utilisateur veut supprimer les variables redondantes
         drop_redundant = st.sidebar.checkbox("Supprimer les variables redondantes", value=False)
         if drop_redundant:
-            threshold = st.slider("Seuil de redondance (corrélation ou V de Cramér)", min_value=0.0, max_value=1.0, value=0.9, help="Plus la valeur est proche de 1, plus il y a une redondance entre les variables.")
+            threshold = st.sidebar.slider("Seuil de redondance (corrélation ou V de Cramér)", min_value=0.0, max_value=1.0, value=0.9, help="Plus la valeur est proche de 1, plus il y a une redondance entre les variables.")
         
         st.sidebar.subheader("Contrôle des individus")
         
