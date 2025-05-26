@@ -15,6 +15,8 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
 from sklearn.decomposition import PCA
 from sklearn.model_selection import KFold, train_test_split, cross_validate, learning_curve, cross_val_score
+from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+from sklearn.utils.multiclass import type_of_target
 from sklearn.inspection import permutation_importance
 import xgboost as xgb
 import lightgbm as lgb
@@ -31,6 +33,7 @@ import zipfile
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 import streamlit.components.v1 as components
+import networkx as nx
 
 def load_file(file_data):
     """
@@ -114,48 +117,104 @@ def correlation_missing_values(df_train: pd.DataFrame, df_test: pd.DataFrame = N
     # Retourner les résultats sous forme de variables séparées
     return cor_mat_train, cor_mat_test, cor_mat_combined, prop_nan_train, prop_nan_test, prop_nan_combined
 
-def cramers_v(x,y):
-    result=-1
-    if len(x.value_counts())==1 :
-        print("First variable is constant")
-    elif len(y.value_counts())==1:
-        print("Second variable is constant")
-    else:   
-        conf_matrix=pd.crosstab(x, y)
-            
-        correct = conf_matrix.shape != (2, 2)
+def cramers_v(x, y):
+    confusion_matrix = pd.crosstab(x, y)
+    if confusion_matrix.shape[0] < 2 or confusion_matrix.shape[1] < 2:
+        return 0
+    chi2 = chi2_contingency(confusion_matrix, correction=False)[0]
+    n = confusion_matrix.sum().sum()
+    phi2 = chi2 / n
+    r, k = confusion_matrix.shape
+    phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
+    rcorr = r - ((r-1)**2)/(n-1)
+    kcorr = k - ((k-1)**2)/(n-1)
+    return np.sqrt(phi2corr / min((kcorr-1), (rcorr-1)))
 
-        chi2, _, _, _ = chi2_contingency(conf_matrix, correction=correct)
-            
-        n = sum(conf_matrix.sum())
-        phi2 = chi2/n
-        r,k = conf_matrix.shape
-        phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))    
-        rcorr = r - ((r-1)**2)/(n-1)
-        kcorr = k - ((k-1)**2)/(n-1)
-        result=np.sqrt(phi2corr / min( (kcorr-1), (rcorr-1)))
-    return round(result,6)
+def build_cramers_matrix(df_cat):
+    cols = df_cat.columns
+    n = len(cols)
+    matrix = pd.DataFrame(np.eye(n), columns=cols, index=cols)
+    for i in range(n):
+        for j in range(i + 1, n):
+            v = cramers_v(df_cat.iloc[:, i], df_cat.iloc[:, j])
+            matrix.iloc[i, j] = matrix.iloc[j, i] = v
+    return matrix
 
-def drop_var_vcramer(data, threshold=0.85):
-    # Garde uniquement les colonnes catégorielles
-    cat_data = data.select_dtypes(include=['object', 'category'])
-    cat_cols = cat_data.columns.tolist()
-    
-    to_drop = set()
-    already_seen = set()
+def select_representative_categorial(df, target, threshold=0.9):
+    df_cat = df.select_dtypes(include=['object', 'category']).copy()
+    v_matrix = build_cramers_matrix(df_cat)
 
-    for i in range(len(cat_cols)):
-        var1 = cat_cols[i]
-        if var1 in to_drop: continue
-        for j in range(i + 1, len(cat_cols)):
-            var2 = cat_cols[j]
-            if var2 in to_drop: continue
-            v = cramers_v(cat_data[var1], cat_data[var2])
+    # Créer le graphe pondéré
+    G = nx.Graph()
+    for col in df_cat.columns:
+        G.add_node(col)
+    for i, var1 in enumerate(df_cat.columns):
+        for j, var2 in enumerate(df_cat.columns):
+            if i >= j: continue
+            v = v_matrix.loc[var1, var2]
             if v >= threshold:
-                # Redondance détectée, on garde var1 et on vire var2
-                to_drop.add(var2)
+                G.add_edge(var1, var2, weight=v)
 
-    return list(to_drop)
+    # Info mutuelle
+    df_encoded = df_cat.apply(lambda col: col.astype("category").cat.codes)
+    mi_scores = mutual_info_classif(df_encoded, df[target], discrete_features=True)
+    mi_dict = dict(zip(df_cat.columns, mi_scores))
+
+    # Sélection
+    to_keep = set()
+    for component in nx.connected_components(G):
+        best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
+        to_keep.add(best)
+
+    to_drop = set(df_cat.columns) - to_keep
+
+    # Création de la figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw(G, pos, with_labels=True, node_color='skyblue', edge_color='gray', node_size=1500, font_size=10, ax=ax)
+
+    return list(to_drop), fig
+
+def select_representative_numerical(df, target, threshold=0.9):
+    df_num = df.select_dtypes(include=['int', 'float']).copy()
+    corr_matrix = df_num.corr().abs()
+
+    # Construction du graphe
+    G = nx.Graph()
+    for col in df_num.columns:
+        G.add_node(col)
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i + 1, len(corr_matrix.columns)):
+            var1 = corr_matrix.columns[i]
+            var2 = corr_matrix.columns[j]
+            corr_val = corr_matrix.iloc[i, j]
+            if corr_val >= threshold:
+                G.add_edge(var1, var2, weight=corr_val)
+
+    # Info mutuelle
+    y = df[target]
+    target_type = type_of_target(y)
+    if target_type in ['binary', 'multiclass', 'multiclass-multioutput']:
+        mi_scores = mutual_info_classif(df_num.fillna(0), y, discrete_features=False)
+    else:
+        mi_scores = mutual_info_regression(df_num.fillna(0), y)
+
+    mi_dict = dict(zip(df_num.columns, mi_scores))
+
+    # Sélection
+    to_keep = set()
+    for component in nx.connected_components(G):
+        best = max(component, key=lambda var: mi_dict.get(var, 0)) if len(component) > 1 else list(component)[0]
+        to_keep.add(best)
+
+    to_drop = set(df_num.columns) - to_keep
+
+    # Création de la figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+    pos = nx.spring_layout(G, seed=42)
+    nx.draw(G, pos, with_labels=True, node_color='lightgreen', edge_color='gray', node_size=1500, font_size=10, ax=ax)
+
+    return list(to_drop), fig
 
 
 def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
@@ -1115,6 +1174,13 @@ if df is not None:
         pb = False
         wrang_finished = False
         
+        st.sidebar.subheader("Contrôle des variables")
+        
+        # Demander si l'utilisateur veut supprimer les variables redondantes
+        drop_redundant = st.sidebar.checkbox("Supprimer les variables redondantes", value=False)
+        if drop_redundant:
+            threshold = st.slider("Seuil de redondance (corrélation ou V de Cramér)", min_value=0.0, max_value=1.0, value=0.9, help="Plus la valeur est proche de 1, plus il y a une redondance entre les variables.")
+        
         st.sidebar.subheader("Contrôle des individus")
         
         # Outliers
@@ -1387,6 +1453,16 @@ if valid_wrang:
         # Imputer les valeurs manquantes
         df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
         
+        # Suppression des variables redondantes
+        if drop_redundant:
+            drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_train_imputed, target, threshold)
+            drop_cramer_num, fig_cramer_num = select_representative_numerical(df_train_imputed, target, threshold)
+            cramer_to_drop = drop_cramer_cat + drop_cramer_num
+            
+            df_train_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
+            if df_test_exists:
+                df_test_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
+        
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
             df_train_encoded, df_test_encoded = encode_data(df_train_imputed, df_test_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
@@ -1543,6 +1619,14 @@ if valid_wrang:
 
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                
+                if fig_cramer_cat:
+                    st.write("**Graphique des redondances catégorielles (Cramer's V):**")
+                    st.pyplot(fig_cramer_cat, use_container_width=True)
+
+                if fig_cramer_num:
+                    st.write("**Graphique des redondances numériques (correlations):**")
+                    st.pyplot(fig_cramer_num, use_container_width=True)
     
         # Affichage du graphique PCA si nécessaire
         if use_pca:
@@ -1606,6 +1690,14 @@ if valid_wrang:
         # Imputer les valeurs manquantes
         df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
     
+        # Suppression des variables redondantes
+        if drop_redundant:
+            drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_imputed, target, threshold)
+            drop_cramer_num, fig_cramer_num = select_representative_numerical(df_imputed, target, threshold)
+            cramer_to_drop = drop_cramer_cat + drop_cramer_num
+            
+            df_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
+        
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         if have_to_encode:
             df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
@@ -1712,7 +1804,7 @@ if valid_wrang:
                 st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
                 plt = heatmap_corr(corr_mat)
                 st.pyplot(plt, use_container_width=True)
-                
+                                
                 st.write("**Proportion de valeurs manquantes par variable (en %) :**")
                 st.dataframe(prop_nan.sort_values(by='NaN Proportion', ascending=False), use_container_width=True)
 
@@ -1726,6 +1818,14 @@ if valid_wrang:
 
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                
+                if fig_cramer_cat:
+                    st.write("**Graphique des redondances catégorielles (Cramer's V):**")
+                    st.pyplot(fig_cramer_cat, use_container_width=True)
+
+                if fig_cramer_num:
+                    st.write("**Graphique des redondances numériques (correlations):**")
+                    st.pyplot(fig_cramer_num, use_container_width=True)
         
             if use_pca:
                 st.plotly_chart(fig)
