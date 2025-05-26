@@ -8,7 +8,7 @@ import plotly.express as px
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
 from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
 from scipy import stats
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, chi2_contingency
 from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -113,6 +113,50 @@ def correlation_missing_values(df_train: pd.DataFrame, df_test: pd.DataFrame = N
 
     # Retourner les résultats sous forme de variables séparées
     return cor_mat_train, cor_mat_test, cor_mat_combined, prop_nan_train, prop_nan_test, prop_nan_combined
+
+def cramers_v(x,y):
+    result=-1
+    if len(x.value_counts())==1 :
+        print("First variable is constant")
+    elif len(y.value_counts())==1:
+        print("Second variable is constant")
+    else:   
+        conf_matrix=pd.crosstab(x, y)
+            
+        correct = conf_matrix.shape != (2, 2)
+
+        chi2, _, _, _ = chi2_contingency(conf_matrix, correction=correct)
+            
+        n = sum(conf_matrix.sum())
+        phi2 = chi2/n
+        r,k = conf_matrix.shape
+        phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))    
+        rcorr = r - ((r-1)**2)/(n-1)
+        kcorr = k - ((k-1)**2)/(n-1)
+        result=np.sqrt(phi2corr / min( (kcorr-1), (rcorr-1)))
+    return round(result,6)
+
+def drop_var_vcramer(data, threshold=0.85):
+    # Garde uniquement les colonnes catégorielles
+    cat_data = data.select_dtypes(include=['object', 'category'])
+    cat_cols = cat_data.columns.tolist()
+    
+    to_drop = set()
+    already_seen = set()
+
+    for i in range(len(cat_cols)):
+        var1 = cat_cols[i]
+        if var1 in to_drop: continue
+        for j in range(i + 1, len(cat_cols)):
+            var2 = cat_cols[j]
+            if var2 in to_drop: continue
+            v = cramers_v(cat_data[var1], cat_data[var2])
+            if v >= threshold:
+                # Redondance détectée, on garde var1 et on vire var2
+                to_drop.add(var2)
+
+    return list(to_drop)
+
 
 def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binary: list[str] = None, list_ordinal: list[str] = None, list_nominal: list[str] = None, ordinal_mapping: dict[str, dict[str, int]] = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """
@@ -979,6 +1023,8 @@ def heatmap_corr(corr_mat):
     plt.tight_layout()
     
     return plt
+
+
 
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
