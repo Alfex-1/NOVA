@@ -157,7 +157,12 @@ def select_representative_categorial(df, target, threshold=0.9):
 
     # Info mutuelle
     df_encoded = df_cat.apply(lambda col: col.astype("category").cat.codes)
-    mi_scores = mutual_info_classif(df_encoded, df[target], discrete_features=True)
+    target_type = type_of_target(df[target])
+    if "continuous" in target_type:
+        mi_scores = mutual_info_regression(df_encoded, df[target])
+    else:
+        mi_scores = mutual_info_classif(df_encoded, df[target], discrete_features=True)
+    
     mi_dict = dict(zip(df_cat.columns, mi_scores))
 
     # Sélection
