@@ -182,7 +182,7 @@ def select_representative_categorial(df, target, threshold=0.9):
         edge_colors = [G[u][v]['weight'] for u, v in G.edges()]
         nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, edge_cmap=plt.cm.Blues, width=2)
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=1800, edgecolors='black', linewidths=0.5)
-        nx.draw_networkx_labels(G, pos, ax=ax, font_size=1  1, font_weight='bold')
+        nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
         plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
