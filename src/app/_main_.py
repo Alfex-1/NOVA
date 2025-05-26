@@ -189,8 +189,8 @@ def select_representative_categorial(df, target, threshold=0.9):
         sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
-        plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+        cbar.set_label("Force d'association", rotation=270, labelpad=15)
+        plt.title(f"Réseau des variables catégorielles fortement associées (V ≥ {threshold*100}%)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
         
@@ -249,7 +249,7 @@ def select_representative_numerical(df, target, threshold=0.9):
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
         cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
-        plt.title("Graphe des redondances (variables fortement corrélées)", fontsize=13)
+        plt.title(f"Réseau des variables numériques fortement corrélées (ρ ≥ {threshold*100}%)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
         
