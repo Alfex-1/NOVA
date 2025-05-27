@@ -457,7 +457,7 @@ class MultiParametricImputer:
         return df_copy
 
     
-def impute_from_supervised(df_train, df_test, cols_to_impute):
+def impute_from_supervised(df_train, cols_to_impute, df_test=None):
     """
     Impute les valeurs manquantes des colonnes sélectionnées en utilisant des modèles supervisés (arbres de décision).
 
@@ -671,7 +671,7 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
     # --- Imputation supervisée ---
     if other_features:
         df_train, df_test, scores_supervised = impute_from_supervised(
-            df_train, df_test, other_features)
+            df_train, df_test=df_test, cols_to_impute=other_features)
         if df_test is not None and (df_test is df_train):
             df_test = None
 
