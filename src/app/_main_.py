@@ -561,9 +561,9 @@ def impute_from_supervised(df_train, df_test, cols_to_impute):
                 metric_used = 'Mean Absolute Error'
 
         scores.append({
-            'feature': target_col,
-            'metric': metric_used,
-            'score': score_value
+            'Variable': target_col,
+            'Métrique': metric_used,
+            'Score': score_value
         })
         scores_df = pd.DataFrame(scores)
 
@@ -660,10 +660,10 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         # Ajout au rapport
         for feature in low_corr_features:
             imputation_report.append({
-                'feature': feature,
-                'method': 'Parametric Imputation',
-                'distribution': parametric_imputer.imputers[feature].distribution,
-                'params': parametric_imputer.imputers[feature].params})
+                'Variable': feature,
+                'Méthode': 'Parametric Imputation',
+                'Distribution': parametric_imputer.imputers[feature].distribution,
+                'Paramètres': parametric_imputer.imputers[feature].params})
 
     # --- Imputation supervisée ---
     if other_features:
@@ -675,11 +675,11 @@ def impute_missing_values(df_train, df_test=None,  target=None, prop_nan=None, c
         # Ajout au rapport pour les variables imputation supervisée
         for feature in other_features:
             imputation_report.append({
-                'feature': feature,
-                'method': 'Supervised Imputation (Decision Tree)'})
+                'Variable': feature,
+                'Méthode': 'Imputation supervisé par arbre de décision'})
 
     else:
-        scores_supervised = pd.DataFrame(columns=['feature', 'metric', 'score'])
+        scores_supervised = pd.DataFrame(columns=['Variable', 'Métrique', 'Score'])
 
     # --- Ajouter la variable cible de retour si nécessaire ---
     if target:
@@ -1346,7 +1346,8 @@ if df is not None:
             pca_option = st.sidebar.radio("Choisissez la méthode de sélection", ("Nombre de composantes", "Variance expliquée"))
 
             if pca_option == "Nombre de composantes":
-                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=df.shape[1]-1, value=1, help="Il se peut que le nombre de composantes conservées diminue si des variables venaient à être supprimées durant le traitement.")
+                df_num_acp = df.select_dtypes(include=['number'])
+                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=df_num_acp.shape[1]-1, value=1, help="Il se peut que le nombre de composantes conservées diminue si des variables venaient à être supprimées durant le traitement.")
             elif pca_option == "Variance expliquée":
                 explained_variance = st.sidebar.slider("Variance expliquée à conserver (%)", min_value=00, max_value=100, value=95)
         
