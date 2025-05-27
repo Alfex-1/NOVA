@@ -1497,6 +1497,7 @@ if valid_wrang:
         df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
         
         # Suppression des variables redondantes
+        fig_cramer_cat, fig_cramer_num = False, False
         if drop_redundant:
             drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_train_imputed, target, threshold)
             drop_cramer_num, fig_cramer_num = select_representative_numerical(df_train_imputed, target, threshold)
