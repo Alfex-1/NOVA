@@ -183,14 +183,14 @@ def select_representative_categorial(df, target, threshold=0.9):
         edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
         norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
         edge_cmap = plt.cm.Blues
-        edges = nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
         sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
         cbar.set_label("Force d'association", rotation=270, labelpad=15)
-        plt.title(f"Réseau des variables catégorielles fortement associées (V ≥ {threshold*100}%)", fontsize=13)
+        plt.title(f"Réseau des variables catégorielles fortement associées (V ≥ {int(threshold*100)}%)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
         
@@ -242,14 +242,14 @@ def select_representative_numerical(df, target, threshold=0.9):
         edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
         norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
         edge_cmap = plt.cm.Blues
-        edges = nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
         sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
         cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
-        plt.title(f"Réseau des variables numériques fortement corrélées (ρ ≥ {threshold*100}%)", fontsize=13)
+        plt.title(f"Réseau des variables numériques fortement corrélées (ρ ≥ {int(threshold*100)}%)", fontsize=13)
         plt.axis("off")
         plt.tight_layout()
         
@@ -1346,7 +1346,7 @@ if df is not None:
             pca_option = st.sidebar.radio("Choisissez la méthode de sélection", ("Nombre de composantes", "Variance expliquée"))
 
             if pca_option == "Nombre de composantes":
-                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=df.shape[1]-1, value=1)
+                n_components = st.sidebar.slider("Nombre de composantes principales", min_value=1, max_value=df.shape[1]-1, value=1, help="Il se peut que le nombre de composantes conservées diminue si des variables venaient à être supprimées durant le traitement.")
             elif pca_option == "Variance expliquée":
                 explained_variance = st.sidebar.slider("Variance expliquée à conserver (%)", min_value=00, max_value=100, value=95)
         
@@ -1536,8 +1536,8 @@ if valid_wrang:
         if use_pca:
             # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
             if pca_option == "Nombre de composantes":
-                n_components = min(n_components, df_train_scaled.shape[1])
-                pca = PCA(n_components=n_components)
+                n_components_valid = min(n_components, df_train_scaled.shape[1]-1)
+                pca = PCA(n_components=n_components_valid)
             elif pca_option == "Variance expliquée":
                 if explained_variance == 100:
                     pca = PCA(n_components=None)
@@ -1768,6 +1768,9 @@ if valid_wrang:
             if pca_option == "Nombre de composantes":
                 n_components = min(n_components, df_scaled.shape[1])
                 pca = PCA(n_components=n_components)
+            
+            
+            
             elif pca_option == "Variance expliquée":
                 if explained_variance == 100:
                     pca = PCA(n_components=None)
