@@ -486,7 +486,10 @@ def impute_from_supervised(df_train, df_test, cols_to_impute):
 
         train_known = df_train[df_train[target_col].notna()].copy()
         train_missing = df_train[df_train[target_col].isna()].copy()
-        test_missing = df_test[df_test[target_col].isna()].copy()
+        if df_test is not None:
+            test_missing = df_test[df_test[target_col].isna()].copy()
+        else:
+            test_missing = None
 
         feature_cols = [col for col in cols_to_impute if col != target_col]
 
@@ -505,7 +508,7 @@ def impute_from_supervised(df_train, df_test, cols_to_impute):
         else:
             X_missing_train = None
 
-        if not test_missing.empty:
+        if test_missing is not None:
             X_missing_test = test_missing[feature_cols].copy()
             for col in X_missing_test.select_dtypes(include='object').columns:
                 le = LabelEncoder()
