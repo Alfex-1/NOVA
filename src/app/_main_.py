@@ -1736,7 +1736,7 @@ if valid_wrang:
             df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
             
         # Imputer les valeurs manquantes
-        df_imputed, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
+        df_imputed, _, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
     
         # Suppression des variables redondantes
         if drop_redundant:
