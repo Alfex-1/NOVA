@@ -1668,7 +1668,7 @@ if valid_wrang:
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
-                if cramer_to_drop in locals():
+                if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
                     st.write(cramer_to_drop)
                 
@@ -1872,7 +1872,7 @@ if valid_wrang:
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
-                if cramer_to_drop in locals():
+                if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
                     st.write(cramer_to_drop)
                 
