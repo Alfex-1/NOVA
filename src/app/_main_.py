@@ -178,21 +178,24 @@ def select_representative_categorial(df, target, threshold=0.9):
         to_drop = set(df_cat.columns) - to_keep
 
         # Création de la figure
-        fig, ax = plt.subplots(figsize=(10, 8))
-        pos = nx.spring_layout(G, seed=42)
-        edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
-        norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
-        edge_cmap = plt.cm.Blues
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
-        nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
-        sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label("Force d'association", rotation=270, labelpad=15)
-        plt.title(f"Réseau des variables catégorielles fortement associées (V ≥ {int(threshold*100)}%)", fontsize=13)
-        plt.axis("off")
-        plt.tight_layout()
+        fig = None
+        if G.number_of_edges() > 0:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            pos = nx.spring_layout(G, seed=42)
+            edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+            norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
+            edge_cmap = plt.cm.Blues
+            nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, 
+                                edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+            nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
+            nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+            sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax)
+            cbar.set_label("Force d'association", rotation=270, labelpad=15)
+            plt.title(f"Réseau des variables catégorielles fortement associées (V ≥ {int(threshold*100)}%)", fontsize=13)
+            plt.axis("off")
+            plt.tight_layout()
         
         return list(to_drop), fig
     
@@ -237,22 +240,25 @@ def select_representative_numerical(df, target, threshold=0.9):
         to_drop = set(df_num.columns) - to_keep
 
         # Création de la figure
-        fig, ax = plt.subplots(figsize=(10, 8))
-        pos = nx.spring_layout(G, seed=42)
-        edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
-        norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
-        edge_cmap = plt.cm.Blues
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
-        nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
-        sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
-        plt.title(f"Réseau des variables numériques fortement corrélées (ρ ≥ {int(threshold*100)}%)", fontsize=13)
-        plt.axis("off")
-        plt.tight_layout()
-        
+        fig = None
+        if G.number_of_edges() > 0:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            pos = nx.spring_layout(G, seed=42)
+            edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+            norm = mcolors.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
+            edge_cmap = plt.cm.Blues
+            nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_weights, edge_cmap=edge_cmap, 
+                                edge_vmin=norm.vmin, edge_vmax=norm.vmax, width=2)
+            nx.draw_networkx_nodes(G, pos, ax=ax, node_color="#90ee90", node_size=1800, edgecolors='black', linewidths=0.5)
+            nx.draw_networkx_labels(G, pos, ax=ax, font_size=11, font_weight='bold')
+            sm = plt.cm.ScalarMappable(cmap=edge_cmap, norm=norm)
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax)
+            cbar.set_label("Force de corrélation", rotation=270, labelpad=15)
+            plt.title(f"Réseau des variables numériques fortement corrélées (ρ ≥ {int(threshold*100)}%)", fontsize=13)
+            plt.axis("off")
+            plt.tight_layout()
+                    
         return list(to_drop), fig
     
     else:
@@ -1722,13 +1728,17 @@ if valid_wrang:
                     df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
                     st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
                 
-                if fig_cramer_cat:
+                if fig_cramer_cat and fig_cramer_cat is not None:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
                     st.pyplot(fig_cramer_cat, use_container_width=True)
+                else:
+                    st.info("Aucune redondance significative détectée entre les variables catégorielles selon le seuil spécifié.")
 
-                if fig_cramer_num:
+                if fig_cramer_num and fig_cramer_num is not None:
                     st.write("**Graphique des redondances numériques (correlations):**")
                     st.pyplot(fig_cramer_num, use_container_width=True)
+                else:
+                    st.info("Aucune redondance significative détectée entre les variables numériques selon le seuil spécifié.")
     
         # Affichage du graphique PCA si nécessaire
         if use_pca:
