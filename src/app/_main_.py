@@ -1128,7 +1128,10 @@ def heatmap_corr(corr_mat):
     
     return plt
 
-
+def advance_progress():
+    global current_step
+    current_step += 1
+    progress_bar.progress(current_step / n_steps_total)
 
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
@@ -1640,16 +1643,16 @@ if valid_wrang:
                 pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
                 pca_infos['Nombre de composantes'] += 1
 
-            # Visualisation avec Plotly (ou Seaborn si tu préfères)
-            fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
-                        markers=True, title="Evolution de la variance expliquée par les composantes principales",
-                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
-                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
-            fig.update_layout(
-                xaxis_title='Nombre de composantes principales',
-                yaxis_title='Variance (%)',
-                legend_title='Type de variance',
-                width=900, height=600)
+                # Visualisation avec Plotly (ou Seaborn si tu préfères)
+                fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                            markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                            labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                            color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+                fig.update_layout(
+                    xaxis_title='Nombre de composantes principales',
+                    yaxis_title='Variance (%)',
+                    legend_title='Type de variance',
+                    width=900, height=600)
         
         step += 1
         progress_bar.progress(step / total_steps)
@@ -1756,122 +1759,143 @@ if valid_wrang:
                 )            
     
     else:
-        steps = [
-            ("Suppression des colonnes inutiles", drop_columns is not None),
-            ("Suppression des doublons", drop_dupli),
-            ("Suppression des valeurs manquantes sur target", True),
-            ("Analyse des valeurs manquantes", True),
-            ("Traitement des outliers", wrang_outliers),
-            ("Imputation des valeurs manquantes", True),
-            ("Suppression des variables redondantes", drop_redundant),
-            ("Encodage des variables", have_to_encode),
-            ("Mise à l'échelle", scale_all_data and scale_method is not None),
-            ("Transformations individuelles", not scale_all_data),
-            ("Application de l'ACP", use_pca)
-        ]
+        # Suppression des colonnes inutiles
+        with st.spinner("🔹 Suppression des colonnes inutiles..."):
+            if drop_columns:
+                df = df.drop(columns=drop_columns)
+        advance_progress()
 
-        total_steps = sum(active for _, active in steps)
-        progress_bar = st.progress(0)
-        step = 0
+        # Suppression des doublons
+        with st.spinner("🔹 Suppression des doublons..."):
+            if drop_dupli:
+                len_before_dupli = len(df)
+                df = df.drop_duplicates()
+                len_after_dupli = len(df)
+                len_diff = len_before_dupli - len_after_dupli
+            else:
+                len_diff = "Les doublons n'ont pas été traités."
+        advance_progress()
 
-        # Étapes conditionnelles avec feedback
-        for label, active in steps:
-            if not active:
-                continue
-            with st.spinner(f"🔧 {label}..."):
-                if label == "Suppression des colonnes inutiles":
-                    df = df.drop(columns=drop_columns)
-                
-                elif label == "Suppression des doublons":
-                    len_before_dupli = len(df)
-                    df = df.drop_duplicates()
-                    len_after_dupli = len(df)
-                    len_diff = len_before_dupli - len_after_dupli
-                
-                elif label == "Suppression des valeurs manquantes sur target":
-                    len_before_nan_target = len(df)
-                    df = df.dropna(subset=[target])
-                    len_after_nan_target = len(df)
-                    len_diff_nan_target = len_before_nan_target - len_after_nan_target
-                
-                elif label == "Analyse des valeurs manquantes":
-                    corr_mat, _, _, prop_nan, _, _ = correlation_missing_values(df)
-                
-                elif label == "Traitement des outliers":
-                    df_outliers, nb_outliers = detect_and_winsorize(df, target=target, contamination=contamination)
-                
-                elif label == "Imputation des valeurs manquantes":
-                    base = df_outliers if wrang_outliers else df.copy()
-                    df_imputed, _, scores_supervised, imputation_report = impute_missing_values(
-                        base, target=target, prop_nan=prop_nan, corr_mat=corr_mat
-                    )
-                
-                elif label == "Suppression des variables redondantes":
-                    drop_cat, fig_cat = select_representative_categorial(df_imputed, target, threshold)
-                    drop_num, fig_num = select_representative_numerical(df_imputed, target, threshold)
-                    df_imputed.drop(columns=drop_cat + drop_num, inplace=True, errors='ignore')
-                
-                elif label == "Encodage des variables":
-                    df_encoded = encode_data(
-                        df_imputed, list_binary=list_binary,
-                        list_ordinal=list_ordinal,
-                        list_nominal=list_nominal,
-                        ordinal_mapping=ordinal_mapping
-                    )
-                elif label == "Mise à l'échelle":
-                    df_scaled = df_encoded.copy()
+        # Étude des valeurs manquantes
+        with st.spinner("🔹 Suppression des NaN dans la target..."):
+            len_before_nan_target = len(df)
+            df = df.dropna(subset=[target])
+            len_after_nan_target = len(df)
+            len_diff_nan_target = len_before_nan_target - len_after_nan_target
+        advance_progress()
+
+        with st.spinner("🔹 Calcul de la corrélation et des valeurs manquantes..."):
+            corr_mat, _, _, prop_nan, _, _ = correlation_missing_values(df)
+        advance_progress()
+
+        # Détection des outliers
+        with st.spinner("🔹 Détection des outliers..."):
+            if wrang_outliers:
+                df_outliers, nb_outliers = detect_and_winsorize(df, target=target, contamination=contamination)
+            else:
+                df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
+        advance_progress()
+
+        # Imputation des valeurs manquantes
+        with st.spinner("🔹 Imputation des valeurs manquantes..."):
+            df_imputed, _, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
+        advance_progress()
+
+        # Suppression des variables redondantes
+        with st.spinner("🔹 Suppression des variables redondantes..."):
+            if drop_redundant:
+                drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_imputed, target, threshold)
+                drop_cramer_num, fig_cramer_num = select_representative_numerical(df_imputed, target, threshold)
+                cramer_to_drop = drop_cramer_cat + drop_cramer_num
+                df_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
+        advance_progress()
+
+        # Encodage
+        with st.spinner("🔹 Encodage des variables..."):
+            if have_to_encode:
+                df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+            else:
+                df_encoded = df_outliers.copy()
+        advance_progress()
+
+        # Mise à l’échelle
+        with st.spinner("🔹 Mise à l'échelle des données..."):
+            if scale_all_data:
+                if scale_method:
                     num_cols = df_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_imputed.select_dtypes(include=['number']).columns
+                    df_scaled = df_encoded.copy()
                     scaler.fit(df_scaled[num_cols])
                     df_scaled[num_cols] = scaler.transform(df_scaled[num_cols])
-                
-                elif label == "Transformations individuelles":
-                    df_scaled = transform_data(
-                        df_encoded,
-                        list_boxcox=list_boxcox,
-                        list_yeo=list_yeo,
-                        list_log=list_log,
-                        list_sqrt=list_sqrt
-                    )
-                
-                elif label == "Application de l'ACP":
-                    df_explicatives = df_scaled.drop(columns=[target]) if not use_target else df_scaled.copy()
-                    if pca_option == "Nombre de composantes":
-                        pca = PCA(n_components=min(n_components, df_scaled.shape[1]))
-                    elif pca_option == "Variance expliquée":
-                        pca = PCA(n_components=None if explained_variance == 100 else explained_variance / 100)
-                    else:
-                        pca = PCA()
-                    pca.fit(df_explicatives)
-                    df_pca = pd.DataFrame(pca.transform(df_explicatives),
-                                        columns=[f'PC{i+1}' for i in range(pca.n_components_)],
-                                        index=df_explicatives.index)
-                    df_scaled = pd.concat([df_pca, df_scaled[target]], axis=1) if not use_target else df_pca.copy()
-                    pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
-                    pca_infos = pd.DataFrame({
-                        'Nombre de composantes': list(range(1, len(pca_inertias) + 1)),
-                        'Variance expliquée': pca_inertias,
-                        'Variance expliquée cumulée': np.cumsum(pca_inertias)
-                    }).round(2)
-                    fig = px.line(
-                        pca_infos,
-                        x='Nombre de composantes',
-                        y=['Variance expliquée', 'Variance expliquée cumulée'],
-                        markers=True,
-                        title="Evolution de la variance expliquée par les composantes principales",
-                        labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
-                        color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'}
-                    )
-                    fig.update_layout(
-                        xaxis_title='Nombre de composantes principales',
-                        yaxis_title='Variance (%)',
-                        legend_title='Type de variance',
-                        width=900, height=600
-                    )
-                    st.plotly_chart(fig)
+                else:
+                    st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
+        advance_progress()
 
-            step += 1
-            progress_bar.progress(step / total_steps)
-    
+        # Transformations individuelles
+        with st.spinner("🔹 Transformations individuelles..."):
+            if not scale_all_data:
+                df_scaled = transform_data(df_encoded, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+        advance_progress()
+        
+        with st.spinner("🔹 Application de l'ACP..."):
+            if use_pca:
+                # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
+                if pca_option == "Nombre de composantes":
+                    n_components = min(n_components, df_scaled.shape[1])
+                    pca = PCA(n_components=n_components)
+                
+                elif pca_option == "Variance expliquée":
+                    if explained_variance == 100:
+                        pca = PCA(n_components=None)
+                    else:
+                        pca = PCA(n_components=explained_variance / 100)  # Conversion du % en proportion
+                else:
+                    pca = PCA()  # Par défaut, on prend tous les composants
+
+                # Appliquer l'ACP sur les variables explicatives
+                if not use_target:
+                    df_explicatives = df_scaled.drop(columns=[target])
+                else:
+                    df_explicatives = df_scaled.copy()
+
+                # Apprentissage de l'ACP
+                pca.fit(df_explicatives)
+
+                # Transformation des données
+                df_pca = pca.transform(df_explicatives)
+                
+                # Créer le DataFrame avec les composantes principales
+                df_pca = pd.DataFrame(df_pca, columns=[f'PC{i+1}' for i in range(df_pca.shape[1])], index=df_explicatives.index)
+
+                # Ajouter le target si nécessaire
+                if not use_target:
+                    df_target = df_scaled[target]
+                    df_scaled = pd.concat([df_pca, df_target], axis=1)
+                else:
+                    df_scaled = df_pca.copy()
+
+                # Calcul des inerties (variances expliquées par composante)
+                pca_inertias = (pca.explained_variance_ratio_ * 100).tolist()
+                pca_cumulative_inertias = [sum(pca_inertias[:i+1]) for i in range(len(pca_inertias))]
+
+                # Création du DataFrame pour la variance expliquée et cumulative
+                pca_infos = pd.DataFrame({'Variance expliquée': pca_inertias, 'Variance expliquée cumulée': pca_cumulative_inertias}).round(2)
+                pca_infos = pca_infos.reset_index().rename(columns={'index': 'Nombre de composantes'})
+                pca_infos['Nombre de composantes'] += 1
+
+                # Visualisation avec Plotly (ou Seaborn si tu préfères)
+                fig = px.line(pca_infos, x='Nombre de composantes', y=['Variance expliquée', 'Variance expliquée cumulée'],
+                            markers=True, title="Evolution de la variance expliquée par les composantes principales",
+                            labels={'value': 'Variance (%)', 'variable': 'Type de variance'},
+                            color_discrete_map={'Variance expliquée': 'red', 'Variance expliquée cumulée': 'blue'})
+                fig.update_layout(
+                    xaxis_title='Nombre de composantes principales',
+                    yaxis_title='Variance (%)',
+                    legend_title='Type de variance',
+                    width=900, height=600
+                )
+                st.plotly_chart(fig)
+        advance_progress()
+                
         # Finir le traitement
         wrang_finished = True
         # Afficher le descriptif de la base de données
