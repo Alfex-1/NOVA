@@ -1671,7 +1671,7 @@ if valid_wrang:
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
                     df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
-                    st.dataframe(df_vars_to_drop, use_container_width=True)
+                    st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
                 
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
@@ -1876,7 +1876,7 @@ if valid_wrang:
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
                     df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
-                    st.dataframe(df_vars_to_drop, use_container_width=True)
+                    st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
                 
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
@@ -1932,9 +1932,9 @@ if valid_mod:
     for model in models:  
         # Déterminer chaque modèle à optimiser
         if model in ["Linear Regression", "Logistic Regression", "KNN"]:
-            n_trial = 80
+            n_trial = 50
         else:
-            n_trial = 40
+            n_trial = 25
         repeats = n_trial
         
         best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
