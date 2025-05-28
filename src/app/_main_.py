@@ -1668,6 +1668,10 @@ if valid_wrang:
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
+                if cramer_to_drop in locals():
+                    st.write("**Variables redondantes supprimées :**")
+                    st.write(cramer_to_drop)
+                
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
                     st.pyplot(fig_cramer_cat, use_container_width=True)
@@ -1758,14 +1762,14 @@ if valid_wrang:
                 num_cols = df_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_imputed.select_dtypes(include=['number']).columns
                 
                 df_scaled = df_encoded.copy()
-                scaler.fit(df_encoded[num_cols])
-                df_scaled[num_cols] = scaler.transform(df_encoded[num_cols])
+                scaler.fit(df_scaled[num_cols])
+                df_scaled[num_cols] = scaler.transform(df_scaled[num_cols])
             else:
                 st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
     
         # Appliquer les transformations individuelles
         if not scale_all_data:
-            df_scaled = transform_data(df_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
+            df_scaled = transform_data(df_encoded, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
     
         # Application de l'ACP en fonction du choix de l'utilisateur
         if use_pca:
@@ -1773,8 +1777,6 @@ if valid_wrang:
             if pca_option == "Nombre de composantes":
                 n_components = min(n_components, df_scaled.shape[1])
                 pca = PCA(n_components=n_components)
-            
-            
             
             elif pca_option == "Variance expliquée":
                 if explained_variance == 100:
@@ -1869,6 +1871,10 @@ if valid_wrang:
 
                 st.write("**Score de l'imputation supervisée :**")
                 st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                
+                if cramer_to_drop in locals():
+                    st.write("**Variables redondantes supprimées :**")
+                    st.write(cramer_to_drop)
                 
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
