@@ -1670,7 +1670,8 @@ if valid_wrang:
                 
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
-                    st.write(cramer_to_drop)
+                    df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
+                    st.dataframe(df_vars_to_drop, use_container_width=True)
                 
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
@@ -1874,7 +1875,8 @@ if valid_wrang:
                 
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
-                    st.write(cramer_to_drop)
+                    df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
+                    st.dataframe(df_vars_to_drop, use_container_width=True)
                 
                 if fig_cramer_cat:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
