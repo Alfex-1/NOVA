@@ -1822,7 +1822,7 @@ if valid_wrang:
             if have_to_encode:
                 df_encoded,_ = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
             else:
-                df_encoded = df_outliers.copy()
+                df_encoded = df_imputed.copy()
         advance_progress(n_steps_total)
 
         # Mise à l’échelle
