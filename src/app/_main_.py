@@ -1139,7 +1139,7 @@ def heatmap_corr(corr_mat):
 def advance_progress(n_steps_total):
     global current_step
     current_step += 1
-    progress_bar.progress(current_step / n_steps_total)
+    progress_bar.progress(min(current_step / n_steps_total, 1.0))
 
 # python -m streamlit run src/app/_main_.py
 st.set_page_config(page_title="NOVA", layout="wide")
@@ -1990,6 +1990,10 @@ if valid_wrang:
         
 if valid_mod:
     # Effectuer la modélisation
+    n_models = len(models)
+    progress_bar = st.progress(0)
+    n_steps_total = n_models+7
+    current_step = 0
 
     # Division des données
     if df_test is None:
@@ -2007,27 +2011,23 @@ if valid_mod:
 
     if use_loocv:
         cv = X_train.shape[0]
+    
     # Choisir le meilleur modèle
     results = []
-    for model in models:  
-        # Déterminer chaque modèle à optimiser
-        if model in ["Linear Regression", "Logistic Regression", "KNN"]:
-            n_trial = 50
-        else:
-            n_trial = 25
-        repeats = n_trial
-        
-        best_model, best_params, best_value = optimize_model(model_choosen=model, task=task,
-                                                            X_train=X_train, y_train=y_train,
-                                                            cv=cv, scoring=scoring_comp,
-                                                            multi_class=multi_class,
-                                                            n_trials=n_trial, n_jobs=-1)
-        
-        # Ajouter les résultats à la liste
-        results.append({
-            'Model': model,
-            'Best Model': best_model,
-            'Best Params': best_params})
+    for model in models:
+        with st.spinner(f"Optimisation de {model}..."):
+            n_trial = 50 if model in ["Linear Regression", "Logistic Regression", "KNN"] else 25
+            best_model, best_params, best_value = optimize_model(
+                model_choosen=model, task=task, X_train=X_train, y_train=y_train,
+                cv=cv, scoring=scoring_comp, multi_class=multi_class,
+                n_trials=n_trial, n_jobs=-1
+            )
+            results.append({
+                'Model': model,
+                'Best Model': best_model,
+                'Best Params': best_params
+            })
+        advance_progress()
 
     # Créer un DataFrame à partir des résultats
     df_train = pd.DataFrame(results)
@@ -2039,19 +2039,20 @@ if valid_mod:
     st.dataframe(df_train2.drop(columns='Best Params'), use_container_width=True)
     
     # Evaluer les meilleurs modèles
-    list_models = df_train['Best Model'].tolist()
+    with st.spinner("Validation croisée sur les meilleurs modèles..."):
+        list_models = df_train['Best Model'].tolist()
+        list_score = []
+        for model in list_models:  # Utilise les vrais objets modèles
+            scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
+            mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
+            std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
 
-    list_score = []
-    for model in list_models:  # Utilise les vrais objets modèles
-        scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
-        mean_scores = {metric: scores[f'test_{metric}'].mean() for metric in scoring_eval}
-        std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
-
-        list_score.append({
-            'Best Model': str(model),  # Affichage du nom seulement
-            'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
-            'Std Scores': std_scores
-        })
+            list_score.append({
+                'Best Model': str(model),  # Affichage du nom seulement
+                'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
+                'Std Scores': std_scores
+            })
+    advance_progress(n_steps_total)
 
     df_score = pd.DataFrame(list_score)  
 
@@ -2176,166 +2177,179 @@ if valid_mod:
             st.dataframe(df_odds)
     
     # Afficher SHAPE et LIME
-    st.subheader("Interprétation globale ou locale des modèles")       
-    for idx, best_model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train2, task)
-        model.fit(X_train, y_train)
+    st.subheader("Interprétation globale ou locale des modèles")
+    with st.spinner("Interprétation des modèles..."):       
+        for idx, best_model in df_score['Best Model'].items():
+            model = instance_model(idx, df_train2, task)
+            model.fit(X_train, y_train)
 
-        try:
-            # SHAP - modèles linéaires
-            if isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
-                explainer = shap.LinearExplainer(model, X_train)
-                shap_values = explainer(X_train)
-                plt.clf()
-                shap.summary_plot(shap_values, X_train, show=False)
-                fig = plt.gcf()
-                st.pyplot(fig)
+            try:
+                # SHAP - modèles linéaires
+                if isinstance(model, (LinearRegression, LogisticRegression, ElasticNet, Ridge, Lasso)):
+                    explainer = shap.LinearExplainer(model, X_train)
+                    shap_values = explainer(X_train)
+                    plt.clf()
+                    shap.summary_plot(shap_values, X_train, show=False)
+                    fig = plt.gcf()
+                    st.write(f"Interprétation globale du modèle {idx} :")
+                    st.pyplot(fig)
 
-            # LIME - uniquement pour KNN
-            elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-                mode = "classification" if task == "Classification" else "regression"
-                lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
-                explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
-                html = explanation.as_html()
-                html = html.replace("<body>", '<body style="background-color:white; color:black;">')
-                components.html(html, height=375, scrolling=True)
+                # LIME - uniquement pour KNN
+                elif isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
+                    mode = "classification" if task == "Classification" else "regression"
+                    lime_explainer = LimeTabularExplainer(X_train.values, mode=mode, feature_names=X_train.columns)
+                    explanation = lime_explainer.explain_instance(X_train.iloc[0].values, model.predict)
+                    st.write(f"Interprétation locale du modèle KNN :")
+                    html = explanation.as_html()
+                    html = html.replace("<body>", '<body style="background-color:white; color:black;">')
+                    components.html(html, height=375, scrolling=True)
 
-            # SHAP - arbres (RandomForest, XGBoost, LightGBM)
-            else:
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(X_train)
-                plt.clf()
-                shap.summary_plot(shap_values, X_train, show=False)
-                fig = plt.gcf()
-                st.pyplot(fig)
+                # SHAP - arbres (RandomForest, XGBoost, LightGBM)
+                else:
+                    explainer = shap.TreeExplainer(model)
+                    shap_values = explainer.shap_values(X_train)
+                    plt.clf()
+                    shap.summary_plot(shap_values, X_train, show=False)
+                    fig = plt.gcf()
+                    st.write(f"Interprétation globale du modèle {idx} :")
+                    st.pyplot(fig)
 
-        except Exception as e:
-            st.warning(f"Erreur pour {idx} : {e}")    
+            except Exception as e:
+                st.warning(f"Erreur pour {idx} : {e}")
+    advance_progress(n_steps_total)    
     
     
     # Appliquer le modèle : calcul-biais-variance    
-    bias_variance_results = []
-    for idx, best_model in df_score['Best Model'].items():
-        model = instance_model(idx, df_train2, task)
-        expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
-            model, task=task,
-            X=X_train.values, y=y_train.values,
-            cv=cv)
+    with st.spinner("Calcul biais-variance..."):
+        bias_variance_results = []
+        for idx, best_model in df_score['Best Model'].items():
+            model = instance_model(idx, df_train2, task)
+            expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
+                model, task=task,
+                X=X_train.values, y=y_train.values,
+                cv=cv)
 
-        # Création d'un dictionnaire pour stocker les résultats
-        result = {
-            "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
-            "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
-            "Bias relatif": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
-            "Variance relatif": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
-        }
-        
-        # Logique de conclusion en fonction du biais relatif et de la variance relative
-        if abs(bias_relative) > 0.2 and var_relative > 0.2:
-            result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
-        elif abs(bias_relative) > 0.2:
-            result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
-        elif var_relative > 0.2:
-            result["Conclusion"] = "Variance élevée : suspicion de sur-ajustement"
-        else:
-            result["Conclusion"] = "Bien équilibré"
-        
-        # Ajout du dictionnaire à la liste des résultats
-        bias_variance_results.append(result)            
+            # Création d'un dictionnaire pour stocker les résultats
+            result = {
+                "Bias": round(bias, 3),  # Biais moyen, arrondi à 3 décimales
+                "Variance": round(var, 3),  # Variance moyenne, arrondi à 3 décimales
+                "Bias relatif": round(bias_relative, 3),  # Biais relatif, arrondi à 3 décimales
+                "Variance relatif": round(var_relative, 3),  # Variance relative, arrondi à 3 décimales
+            }
+            
+            # Logique de conclusion en fonction du biais relatif et de la variance relative
+            if abs(bias_relative) > 0.2 and var_relative > 0.2:
+                result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
+            elif abs(bias_relative) > 0.2:
+                result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
+            elif var_relative > 0.2:
+                result["Conclusion"] = "Variance élevée : suspicion de sur-ajustement"
+            else:
+                result["Conclusion"] = "Bien équilibré"
+            
+            # Ajout du dictionnaire à la liste des résultats
+            bias_variance_results.append(result)            
         
     # Création du DataFrame
     df_bias_variance = pd.DataFrame(bias_variance_results)
     df_bias_variance.index = df_train2.index
+    advance_progress(n_steps_total)
 
     # Affichage dans Streamlit
     st.subheader("Etude Bias-Variance")
     st.dataframe(df_bias_variance)
 
     # Matrices de confusion
-    if task == 'Classification':
-        st.subheader(f"Bilan des Erreurs de Classification")
-        for index, model in df_score['Best Model'].items():
-            model = instance_model(idx, df_train2, task)
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-            
-            # Calculer la matrice de confusion
-            cm = confusion_matrix(y_test, y_pred)
-            
-            fig, ax = plt.subplots(figsize=(3, 2))  # Taille du graphique
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
-                        xticklabels=[f"Classe {i}" for i in range(cm.shape[1])] if multi_class else ["Classe 0", "Classe 1"],
-                        yticklabels=[f"Classe {i}" for i in range(cm.shape[0])] if multi_class else ["Classe 0", "Classe 1"],
-                        annot_kws={"size": 5},
-                        cbar=False)  # Désactiver la barre de couleur si tu veux
+    with st.spinner("Calcul de la matrice de confusion..."):
+        if task == 'Classification':
+            st.subheader(f"Bilan des Erreurs de Classification")
+            for index, model in df_score['Best Model'].items():
+                model = instance_model(idx, df_train2, task)
+                model.fit(X_train, y_train)
+                y_pred = model.predict(X_test)
+                
+                # Calculer la matrice de confusion
+                cm = confusion_matrix(y_test, y_pred)
+                
+                fig, ax = plt.subplots(figsize=(3, 2))  # Taille du graphique
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                            xticklabels=[f"Classe {i}" for i in range(cm.shape[1])] if multi_class else ["Classe 0", "Classe 1"],
+                            yticklabels=[f"Classe {i}" for i in range(cm.shape[0])] if multi_class else ["Classe 0", "Classe 1"],
+                            annot_kws={"size": 5},
+                            cbar=False)  # Désactiver la barre de couleur si tu veux
 
-            # Ajuster la taille des labels
-            ax.set_xticklabels(ax.get_xticklabels(), fontsize=5)  # Taille des labels sur l'axe X
-            ax.set_yticklabels(ax.get_yticklabels(), fontsize=5)  # Taille des labels sur l'axe Y
-            
-            plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
-            plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
-            plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
-            
-            st.pyplot(fig)
-            plt.close(fig)
+                # Ajuster la taille des labels
+                ax.set_xticklabels(ax.get_xticklabels(), fontsize=5)  # Taille des labels sur l'axe X
+                ax.set_yticklabels(ax.get_yticklabels(), fontsize=5)  # Taille des labels sur l'axe Y
+                
+                plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
+                plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
+                plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
+                
+                st.pyplot(fig)
+                plt.close(fig)
+    advance_progress(n_steps_total)
     
     # Feature importance
     st.subheader(f"Importance des variables")
-    for idx, mdl in df_score['Best Model'].items():
-        model = instance_model(idx, df_train2, task)
-        model.fit(X_train, y_train)
-        
-        # Calculer l'importance des features par permutation
-        result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
+    with st.spinner("Calcul de l'importance des variables..."):
+        for idx, mdl in df_score['Best Model'].items():
+            model = instance_model(idx, df_train2, task)
+            model.fit(X_train, y_train)
+            
+            # Calculer l'importance des features par permutation
+            result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
 
-        # Extraire l'importance moyenne des features
-        importances = result.importances_mean
-        std_importances = result.importances_std
+            # Extraire l'importance moyenne des features
+            importances = result.importances_mean
+            std_importances = result.importances_std
 
-        # Trier les importances par ordre décroissant
-        sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
+            # Trier les importances par ordre décroissant
+            sorted_idx = np.argsort(importances)[::-1]  # Tri décroissant
 
-        # Trier les valeurs d'importance et les noms des features
-        sorted_importances = importances[sorted_idx]
-        sorted_std_importances = std_importances[sorted_idx]
-        sorted_features = X_train.columns[sorted_idx]
+            # Trier les valeurs d'importance et les noms des features
+            sorted_importances = importances[sorted_idx]
+            sorted_std_importances = std_importances[sorted_idx]
+            sorted_features = X_train.columns[sorted_idx]
 
-        # Créer le graphique
-        plt.figure(figsize=(5, 3))
-        plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
-        plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
-        plt.xticks(fontsize=6)
-        plt.xlabel("Importance", fontsize=7)
-        plt.title(f"Importance des variables par permutation - {idx}", fontsize=8)
-        plt.gca().invert_yaxis()
-        st.pyplot(plt)
-        plt.close()
+            # Créer le graphique
+            plt.figure(figsize=(5, 3))
+            plt.barh(range(len(sorted_features)), sorted_importances, xerr=sorted_std_importances, align="center")
+            plt.yticks(range(len(sorted_features)), sorted_features, fontsize=6)
+            plt.xticks(fontsize=6)
+            plt.xlabel("Importance", fontsize=7)
+            plt.title(f"Importance des variables par permutation - {idx}", fontsize=8)
+            plt.gca().invert_yaxis()
+            st.pyplot(plt)
+            plt.close()
+    advance_progress(n_steps_total)
             
     # Courbes d'apprentissage
     st.subheader(f"Courbes d'apprentissage")
     
-    for idx, mdl in df_score['Best Model'].items(): 
-        model = instance_model(idx, df_train2, task)       
-        train_sizes, train_scores, test_scores = learning_curve(
-            model, X_train, y_train, cv=cv, scoring=scoring_comp,
-            train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
-        )
+    with st.spinner("Traçage des courbes d'apprentissage..."):
+        for idx, mdl in df_score['Best Model'].items(): 
+            model = instance_model(idx, df_train2, task)       
+            train_sizes, train_scores, test_scores = learning_curve(
+                model, X_train, y_train, cv=cv, scoring=scoring_comp,
+                train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=-1
+            )
 
-        train_scores_mean = np.mean(train_scores, axis=1)
-        test_scores_mean = np.mean(test_scores, axis=1)
+            train_scores_mean = np.mean(train_scores, axis=1)
+            test_scores_mean = np.mean(test_scores, axis=1)
 
-        plt.figure(figsize=(5, 3))
-        plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
-        plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
-        plt.title(f"Learning Curve - {idx}", fontsize=8)
-        plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
-        plt.ylabel("Score", fontsize=7)
-        plt.legend(loc="best", fontsize=6)
-        plt.xticks(fontsize=6)
-        plt.yticks(fontsize=6)
-        st.pyplot(plt)
-        plt.close()
+            plt.figure(figsize=(5, 3))
+            plt.plot(train_sizes, train_scores_mean, 'o-', color="r", label="Score entraînement")
+            plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Score validation")
+            plt.title(f"Learning Curve - {idx}", fontsize=8)
+            plt.xlabel("Taille de l'échantillon d'entraînement", fontsize=7)
+            plt.ylabel("Score", fontsize=7)
+            plt.legend(loc="best", fontsize=6)
+            plt.xticks(fontsize=6)
+            plt.yticks(fontsize=6)
+            st.pyplot(plt)
+            plt.close()
+    advance_progress(n_steps_total)
         
     # Analyse de drift
     st.subheader("Analyse de drift : comparaison des distributions entre apprentissage et validation")
