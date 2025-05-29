@@ -1992,7 +1992,7 @@ if valid_mod:
     # Effectuer la modélisation
     n_models = len(models)
     progress_bar = st.progress(0)
-    n_steps_total = n_models+7
+    n_steps_total = n_models+6
     current_step = 0
 
     # Division des données
