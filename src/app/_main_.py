@@ -1847,7 +1847,7 @@ if valid_wrang:
             if use_pca:
                 # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
                 if pca_option == "Nombre de composantes":
-                    n_components = min(n_components, df_scaled.shape[1])
+                    n_components = min(n_components, df_scaled.shape[1]-1)
                     pca = PCA(n_components=n_components)
                 
                 elif pca_option == "Variance expliquée":
