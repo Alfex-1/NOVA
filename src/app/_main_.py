@@ -346,7 +346,7 @@ def encode_data(df_train: pd.DataFrame, df_test: pd.DataFrame = None, list_binar
             df_test.drop(columns=list_nominal, inplace=True)
             df_test = pd.concat([df_test, encoded_test], axis=1)
 
-    return df_train, df_test if df_test is not None else df_train    
+    return df_train, df_test    
 class ParametricImputer:
     def __init__(self, random_state=42):
         self.random_state = random_state
@@ -1340,7 +1340,7 @@ if df is not None:
             list_log = None
             list_sqrt = None            
             list_boxcox = st.sidebar.multiselect("Variables à transformer avec Box-Cox", strictly_positive_vars)
-            list_yeo = st.sidebar.multiselect("Variables à transformer avec Yeo-Johnson", df_num.columns.to_list())
+            list_yeo = st.sidebar.multiselect("Variables à transformer avec Yeo-Johnson", df_num.drop(columns=drop_columns, errors='ignore').columns.to_list())
             list_log = st.sidebar.multiselect("Variables à transformer avec le logarithme", strictly_positive_vars)
             list_sqrt = st.sidebar.multiselect("Variables à transformer avec la racine carrée", positive_or_zero_vars)
             
@@ -1820,7 +1820,7 @@ if valid_wrang:
         # Encodage
         with st.spinner("Encodage des variables catégorielles..."):
             if have_to_encode:
-                df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
+                df_encoded,_ = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
             else:
                 df_encoded = df_outliers.copy()
         advance_progress(n_steps_total)
