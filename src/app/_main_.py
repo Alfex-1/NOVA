@@ -144,6 +144,7 @@ def build_cramers_matrix(df_cat):
 
 def select_representative_categorial(df, target, threshold=0.9):
     df_cat = df.select_dtypes(include=['object', 'category']).copy()
+    df_cat.drop(columns=[target], inplace=True, errors='ignore')
     
     if not df_cat.empty:
         v_matrix = build_cramers_matrix(df_cat)
@@ -204,6 +205,7 @@ def select_representative_categorial(df, target, threshold=0.9):
 
 def select_representative_numerical(df, target, threshold=0.9):
     df_num = df.select_dtypes(include=['int', 'float']).copy()
+    df_num.drop(columns=[target], inplace=True, errors='ignore')
     
     if not df_num.empty:
     

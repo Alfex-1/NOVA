@@ -6,12 +6,10 @@ seaborn
 scikit-learn
 xgboost
 lightgbm
-scikeras
 optuna
 plotly
 scipy
 streamlit
-mlflow
 joblib
 shap
 lime
