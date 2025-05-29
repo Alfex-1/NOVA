@@ -1718,10 +1718,11 @@ if valid_wrang:
                     st.write("**Score de l'imputation supervisée :**")
                     st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
-                if 'cramer_to_drop' in locals():
-                    st.write("**Variables redondantes supprimées :**")
-                    df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
+                df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
+                if df_vars_to_drop.empty:
                     st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucune redondance significative détectée entre les variables selon le seuil spécifié.")
                 
                 if fig_cramer_cat and fig_cramer_cat is not None:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
@@ -1955,19 +1956,18 @@ if valid_wrang:
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
                     df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
-                    st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
+                    if df_vars_to_drop.empty:
+                        st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucune redondance significative détectée entre les variables selon le seuil spécifié.")
                 
                 if fig_cramer_cat and fig_cramer_cat is not None:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
                     st.pyplot(fig_cramer_cat, use_container_width=True)
-                    if fig_cramer_cat is None:
-                        st.info("Aucune redondance significative détectée entre les variables catégorielles selon le seuil spécifié.")
 
                 if fig_cramer_num and fig_cramer_num is not None:
                     st.write("**Graphique des redondances numériques (correlations):**")
                     st.pyplot(fig_cramer_num, use_container_width=True)
-                    if fig_cramer_num is None:
-                        st.info("Aucune redondance significative détectée entre les variables numériques selon le seuil spécifié.")
         
             if use_pca:
                 st.plotly_chart(fig)
