@@ -2001,6 +2001,9 @@ if valid_mod:
         y_train = df[target]
         X_test = df_test.drop(columns=target)
         y_test = df_test[target]
+        
+    if hasattr(X_train, "columns") and not hasattr(X_test, "columns"):
+        X_test = pd.DataFrame(X_test, columns=X_train.columns)
 
     if use_loocv:
         cv = X_train.shape[0]
@@ -2339,7 +2342,7 @@ if valid_mod:
     
     drift_results = []
 
-    for col in X.columns:
+    for col in X_train.columns:
         stat, p_value = ks_2samp(X_train[col], X_test[col])
         drift_results.append({
             "Feature": col,
