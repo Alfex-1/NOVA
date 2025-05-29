@@ -1134,7 +1134,7 @@ def heatmap_corr(corr_mat):
     
     return plt
 
-def advance_progress():
+def advance_progress(n_steps_total):
     global current_step
     current_step += 1
     progress_bar.progress(current_step / n_steps_total)
@@ -1331,9 +1331,9 @@ if df is not None:
         # Transformation des variables (Box-Cox, Yeo-Johnson, Log, Sqrt)
         if not scale_all_data:
             # Déterminer les variables strcitement positives
-            strictly_positive_vars = df_num.columns[(df_num > 0).all()].to_list()
+            strictly_positive_vars = df_num.drop(columns=drop_columns, errors='ignore').loc[:, (df_num.drop(columns=drop_columns, errors='ignore') > 0).all()].columns.to_list()
             # Déterminer les variables positives ou nulles
-            positive_or_zero_vars = df_num.columns[(df_num >= 0).all()].to_list()
+            positive_or_zero_vars = df_num.drop(columns=drop_columns, errors='ignore').loc[:, (df_num.drop(columns=drop_columns, errors='ignore') >= 0).all()].columns.to_list()
             
             list_boxcox = None
             list_yeo = None
@@ -1476,22 +1476,19 @@ if valid_wrang:
 
     if df_test_exists or split_data_val:
         progress_bar = st.progress(0)
-        progress_text = st.empty()
-        step = 0
-        total_steps = 10
+        n_steps_total = 11
+        current_step = 0
         
         # Suppression des colonnes inutiles
-        # progress_text.text("Étape 1/10 : Suppression des colonnes inutiles")
-        with st.spinner("🔄 Suppression des colonnes inutiles..."):
+        with st.spinner("Suppression des colonnes inutiles..."):
             if drop_columns:
                 df = df.drop(columns=drop_columns)
                 df_test = df_test.drop(columns=drop_columns)
-        step += 1
-        progress_bar.progress(step / total_steps)
+        
+        advance_progress(n_steps_total)
            
         # Suppression des doublons
-        # progress_text.text("Étape 2/10 : Suppression des doublons")
-        with st.spinner("🔄 Suppression des doublons..."):
+        with st.spinner("Suppression des doublons..."):
             if drop_dupli:
                 len_before_dupli = len(df)
                 df = df.drop_duplicates()
@@ -1499,12 +1496,11 @@ if valid_wrang:
                 len_diff = len_before_dupli - len_after_dupli
             else:
                 len_diff = "Les doublons n'ont pas été traités."
-        step += 1
-        progress_bar.progress(step / total_steps)     
+        
+        advance_progress(n_steps_total)     
         
         # Etude des valeurs manquantes
-        # progress_text.text("Étape 3/10 : Etude des valeurs manquantes")
-        with st.spinner("🔄 Etude des valeurs manquantes"):
+        with st.spinner("Etude des valeurs manquantes..."):
             len_before_nan_target_train = len(df)
             df_train = df.dropna(subset=[target])
             len_after_nan_target_train = len(df_train)
@@ -1518,27 +1514,25 @@ if valid_wrang:
         
         corr_mat_train, corr_mat_test, corr_mat, prop_nan_train, prop_nan_test, prop_nan = correlation_missing_values(df_train, df_test)
         
-        step += 1
-        progress_bar.progress(step / total_steps)       
+        advance_progress(n_steps_total)       
         
         # Détecter les outliers
-        with st.spinner("🔄 Détection et traitement des outliers"):
+        with st.spinner("Détection et traitement des outliers..."):
             if wrang_outliers:
                 df_train_outliers, df_test_outliers, nb_outliers = detect_and_winsorize(df_train, df_test, target = target, contamination = contamination)
             else:
                 df_train_outliers, df_test_outliers, nb_outliers = df_train.copy(), df_test.copy(), "Aucun outlier traité."
-        step += 1
-        progress_bar.progress(step / total_steps)
+        
+        advance_progress(n_steps_total)
             
         # Imputer les valeurs manquantes
-        with st.spinner("🔄 Imputation des données manquantes"):
+        with st.spinner("Imputation des données manquantes..."):
             df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
         
-        step += 1
-        progress_bar.progress(step / total_steps)
+        advance_progress(n_steps_total)
         
         # Suppression des variables redondantes
-        with st.spinner("🔄 Suppression des variables redondantes"):
+        with st.spinner("Suppression des variables redondantes..."):
             fig_cramer_cat, fig_cramer_num = False, False
             if drop_redundant:
                 drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_train_imputed, target, threshold)
@@ -1548,23 +1542,23 @@ if valid_wrang:
                 df_train_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
                 if df_test_exists:
                     df_test_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
-        step += 1
-        progress_bar.progress(step / total_steps)
+        
+        advance_progress(n_steps_total)
         
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
-        with st.spinner("🔄 Encodage des variables catégorielles"):
+        with st.spinner("Encodage des variables catégorielles..."):
             if have_to_encode:
                 df_train_encoded, df_test_encoded = encode_data(df_train_imputed, df_test_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
             else:
                 df_train_encoded, df_test_encoded = df_train_imputed.copy(), df_test_imputed.copy()
-        step += 1
-        progress_bar.progress(step / total_steps)
+        
+        advance_progress(n_steps_total)
     
         # Sélection des vraies variables numériques depuis df_train_imputed
         num_cols = df_train_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_train_imputed.select_dtypes(include=['number']).columns
 
         # Mise à l'échelle
-        with st.spinner("🔄 Encodage des variables catégorielles"):
+        with st.spinner("Mise à l'échelle des données..."):
             if scale_all_data:
                 if scale_method:
                     scaler.fit(df_train_encoded[num_cols])
@@ -1577,19 +1571,17 @@ if valid_wrang:
                 else:
                     st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
                     
-        step += 1
-        progress_bar.progress(step / total_steps)
+        advance_progress(n_steps_total)
                 
         # Appliquer les transformations individuelles
-        with st.spinner("🔄 Transformation des variables numériques"):
+        with st.spinner("Transformation individuelles..."):
             if not scale_all_data:
                 df_train_scaled, df_test_scaled = transform_data(df_train_imputed, df_test_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
 
-        step += 1
-        progress_bar.progress(step / total_steps)
+        advance_progress(n_steps_total)
         
         # Application de l'ACP en fonction du choix de l'utilisateur
-        with st.spinner("🔄 Transformation factorielle des variables (ACP)"):
+        with st.spinner("Transformation factorielle des variables (ACP)..."):
             if use_pca:
                 # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
                 if pca_option == "Nombre de composantes":
@@ -1664,8 +1656,7 @@ if valid_wrang:
                     legend_title='Type de variance',
                     width=900, height=600)
         
-        step += 1
-        progress_bar.progress(step / total_steps)
+        advance_progress(n_steps_total)
             
         # Finir le traitement
         wrang_finished = True
@@ -1720,8 +1711,9 @@ if valid_wrang:
                 st.write("**Résumé des méthodes d'imputation utilisées :**")
                 st.dataframe(imputation_report, use_container_width=True, hide_index=True)
 
-                st.write("**Score de l'imputation supervisée :**")
-                st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                if not scores_supervised.empty:
+                    st.write("**Score de l'imputation supervisée :**")
+                    st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
@@ -1731,14 +1723,14 @@ if valid_wrang:
                 if fig_cramer_cat and fig_cramer_cat is not None:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
                     st.pyplot(fig_cramer_cat, use_container_width=True)
-                else:
-                    st.info("Aucune redondance significative détectée entre les variables catégorielles selon le seuil spécifié.")
+                    if fig_cramer_cat is None:
+                        st.info("Aucune redondance significative détectée entre les variables catégorielles selon le seuil spécifié.")
 
                 if fig_cramer_num and fig_cramer_num is not None:
                     st.write("**Graphique des redondances numériques (correlations):**")
                     st.pyplot(fig_cramer_num, use_container_width=True)
-                else:
-                    st.info("Aucune redondance significative détectée entre les variables numériques selon le seuil spécifié.")
+                    if fig_cramer_num is None:
+                        st.info("Aucune redondance significative détectée entre les variables numériques selon le seuil spécifié.")
     
         # Affichage du graphique PCA si nécessaire
         if use_pca:
@@ -1774,13 +1766,16 @@ if valid_wrang:
     
     else:
         # Suppression des colonnes inutiles
-        with st.spinner("🔹 Suppression des colonnes inutiles..."):
+        progress_bar = st.progress(0)
+        n_steps_total = 11
+        current_step = 0
+        with st.spinner("Suppression des colonnes inutiles..."):
             if drop_columns:
                 df = df.drop(columns=drop_columns)
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Suppression des doublons
-        with st.spinner("🔹 Suppression des doublons..."):
+        with st.spinner("Suppression des doublons..."):
             if drop_dupli:
                 len_before_dupli = len(df)
                 df = df.drop_duplicates()
@@ -1788,52 +1783,50 @@ if valid_wrang:
                 len_diff = len_before_dupli - len_after_dupli
             else:
                 len_diff = "Les doublons n'ont pas été traités."
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Étude des valeurs manquantes
-        with st.spinner("🔹 Suppression des NaN dans la target..."):
+        with st.spinner("Etude des valeurs manquantes..."):
             len_before_nan_target = len(df)
             df = df.dropna(subset=[target])
             len_after_nan_target = len(df)
             len_diff_nan_target = len_before_nan_target - len_after_nan_target
-        advance_progress()
 
-        with st.spinner("🔹 Calcul de la corrélation et des valeurs manquantes..."):
             corr_mat, _, _, prop_nan, _, _ = correlation_missing_values(df)
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Détection des outliers
-        with st.spinner("🔹 Détection des outliers..."):
+        with st.spinner("Détection et traitement des outliers..."):
             if wrang_outliers:
                 df_outliers, nb_outliers = detect_and_winsorize(df, target=target, contamination=contamination)
             else:
                 df_outliers, nb_outliers = df.copy(), "Aucun outlier traité."
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Imputation des valeurs manquantes
-        with st.spinner("🔹 Imputation des valeurs manquantes..."):
+        with st.spinner("Imputation des valeurs manquantes..."):
             df_imputed, _, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Suppression des variables redondantes
-        with st.spinner("🔹 Suppression des variables redondantes..."):
+        with st.spinner("Suppression des variables redondantes..."):
             if drop_redundant:
                 drop_cramer_cat, fig_cramer_cat = select_representative_categorial(df_imputed, target, threshold)
                 drop_cramer_num, fig_cramer_num = select_representative_numerical(df_imputed, target, threshold)
                 cramer_to_drop = drop_cramer_cat + drop_cramer_num
                 df_imputed.drop(columns=cramer_to_drop, inplace=True, errors='ignore')
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Encodage
-        with st.spinner("🔹 Encodage des variables..."):
+        with st.spinner("Encodage des variables catégorielles..."):
             if have_to_encode:
                 df_encoded = encode_data(df_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
             else:
                 df_encoded = df_outliers.copy()
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Mise à l’échelle
-        with st.spinner("🔹 Mise à l'échelle des données..."):
+        with st.spinner("Mise à l'échelle des données..."):
             if scale_all_data:
                 if scale_method:
                     num_cols = df_imputed.select_dtypes(include=['number']).drop(columns=target).columns if not use_target else df_imputed.select_dtypes(include=['number']).columns
@@ -1842,15 +1835,15 @@ if valid_wrang:
                     df_scaled[num_cols] = scaler.transform(df_scaled[num_cols])
                 else:
                     st.warning("⚠️ Veuillez sélectionner une méthode de mise à l'échelle.")
-        advance_progress()
+        advance_progress(n_steps_total)
 
         # Transformations individuelles
-        with st.spinner("🔹 Transformations individuelles..."):
+        with st.spinner("Transformations individuelles..."):
             if not scale_all_data:
                 df_scaled = transform_data(df_encoded, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
-        advance_progress()
+        advance_progress(n_steps_total)
         
-        with st.spinner("🔹 Application de l'ACP..."):
+        with st.spinner("Transformation factorielle des variables (ACP)..."):
             if use_pca:
                 # Initialisation de l'ACP avec les paramètres choisis par l'utilisateur
                 if pca_option == "Nombre de composantes":
@@ -1908,7 +1901,8 @@ if valid_wrang:
                     width=900, height=600
                 )
                 st.plotly_chart(fig)
-        advance_progress()
+        
+        advance_progress(n_steps_total)
                 
         # Finir le traitement
         wrang_finished = True
@@ -1950,8 +1944,9 @@ if valid_wrang:
                 st.write("**Résumé des méthodes d'imputation utilisées :**")
                 st.dataframe(imputation_report, use_container_width=True, hide_index=True)
 
-                st.write("**Score de l'imputation supervisée :**")
-                st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                if not scores_supervised.empty:
+                    st.write("**Score de l'imputation supervisée :**")
+                    st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
                 if 'cramer_to_drop' in locals():
                     st.write("**Variables redondantes supprimées :**")
