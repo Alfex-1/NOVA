@@ -2298,7 +2298,7 @@ if valid_mod:
             model.fit(X_train, y_train)
             
             # Calculer l'importance des features par permutation
-            result = permutation_importance(model, X_test, y_test, n_repeats=repeats, random_state=42)
+            result = permutation_importance(model, X_test, y_test, n_repeats=n_trial, random_state=42)
 
             # Extraire l'importance moyenne des features
             importances = result.importances_mean
