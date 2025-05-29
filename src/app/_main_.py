@@ -901,19 +901,19 @@ def objective(trial, task="regression", model_type="Random Forest", multi_class=
         elif model_linreg == "ridge":
             ridge_alpha = trial.suggest_float("ridge_alpha", 0.01, 10.01, log=True)
             ridge_alpha = round(ridge_alpha, 2)
-            model = Ridge(alpha=ridge_alpha, max_iter=1000000, random_state=42)
+            model = Ridge(alpha=ridge_alpha, max_iter=100000, random_state=42)
 
         elif model_linreg == "lasso":
             lasso_alpha = trial.suggest_float("lasso_alpha", 0.01, 10.01, log=True)
             lasso_alpha = round(lasso_alpha, 2)
-            model = Lasso(alpha=lasso_alpha, max_iter=1000000, random_state=42)
+            model = Lasso(alpha=lasso_alpha, max_iter=100000, random_state=42)
 
         elif model_linreg == "elasticnet":
             enet_alpha = trial.suggest_float("enet_alpha", 0.01, 10.01, log=True)
             l1_ratio = trial.suggest_float("l1_ratio", 0, 1.0, step=0.01)
             enet_alpha = round(enet_alpha, 2)
             l1_ratio = round(l1_ratio, 2)
-            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio, max_iter=1000000, random_state=42)
+            model = ElasticNet(alpha=enet_alpha, l1_ratio=l1_ratio, max_iter=100000, random_state=42)
 
     elif model_type == "Logistic Regression":
         # Paramètres pour la régression logistique
@@ -2027,7 +2027,7 @@ if valid_mod:
                 'Best Model': best_model,
                 'Best Params': best_params
             })
-        advance_progress()
+        advance_progress(n_steps_total)
 
     # Créer un DataFrame à partir des résultats
     df_train = pd.DataFrame(results)
