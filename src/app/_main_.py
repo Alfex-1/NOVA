@@ -1659,6 +1659,7 @@ if valid_wrang:
                     width=900, height=600)
         
         advance_progress(n_steps_total)
+        progress_bar.empty()
             
         # Finir le traitement
         wrang_finished = True
@@ -1905,6 +1906,7 @@ if valid_wrang:
                 st.plotly_chart(fig)
         
         advance_progress(n_steps_total)
+        progress_bar.empty()
                 
         # Finir le traitement
         wrang_finished = True
@@ -1955,13 +1957,17 @@ if valid_wrang:
                     df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
                     st.dataframe(df_vars_to_drop, use_container_width=True, hide_index=True)
                 
-                if fig_cramer_cat:
+                if fig_cramer_cat and fig_cramer_cat is not None:
                     st.write("**Graphique des redondances catégorielles (Cramer's V):**")
                     st.pyplot(fig_cramer_cat, use_container_width=True)
+                    if fig_cramer_cat is None:
+                        st.info("Aucune redondance significative détectée entre les variables catégorielles selon le seuil spécifié.")
 
-                if fig_cramer_num:
+                if fig_cramer_num and fig_cramer_num is not None:
                     st.write("**Graphique des redondances numériques (correlations):**")
                     st.pyplot(fig_cramer_num, use_container_width=True)
+                    if fig_cramer_num is None:
+                        st.info("Aucune redondance significative détectée entre les variables numériques selon le seuil spécifié.")
         
             if use_pca:
                 st.plotly_chart(fig)
@@ -2350,6 +2356,7 @@ if valid_mod:
             st.pyplot(plt)
             plt.close()
     advance_progress(n_steps_total)
+    progress_bar.empty()
         
     # Analyse de drift
     st.subheader("Analyse de drift : comparaison des distributions entre apprentissage et validation")
