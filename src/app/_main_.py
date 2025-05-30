@@ -1547,9 +1547,25 @@ if valid_wrang:
         
         advance_progress(n_steps_total)
         
+        remaining_vars = [col for col in df_train_imputed.columns if col != target]
+        if not remaining_vars:
+            st.error("Toutes les variables explicatives ont été supprimées après détection des redondances. Impossible de poursuivre le traitement.")
+            st.stop()
+            progress_bar.empty()
+        
         # Appliquer l'encodage des variables (binaire, ordinal, nominal)
         with st.spinner("Encodage des variables catégorielles..."):
             if have_to_encode:
+                
+                list_binary = [var for var in list_binary if var not in cramer_to_drop]
+                list_ordinal = [var for var in list_ordinal if var not in cramer_to_drop]
+                list_nominal = [var for var in list_nominal if var not in cramer_to_drop]
+                ordinal_mapping = {
+                    var: mapping
+                    for var, mapping in ordinal_mapping.items()
+                    if var in list_ordinal
+                }
+                
                 df_train_encoded, df_test_encoded = encode_data(df_train_imputed, df_test_imputed, list_binary=list_binary, list_ordinal=list_ordinal, list_nominal=list_nominal, ordinal_mapping=ordinal_mapping)
             else:
                 df_train_encoded, df_test_encoded = df_train_imputed.copy(), df_test_imputed.copy()
@@ -1578,6 +1594,11 @@ if valid_wrang:
         # Appliquer les transformations individuelles
         with st.spinner("Transformation individuelles..."):
             if not scale_all_data:
+                list_boxcox = [var for var in list_boxcox if var not in cramer_to_drop]
+                list_yeo = [var for var in list_yeo if var not in cramer_to_drop]
+                list_log = [var for var in list_log if var not in cramer_to_drop]
+                list_sqrt = [var for var in list_sqrt if var not in cramer_to_drop]
+                
                 df_train_scaled, df_test_scaled = transform_data(df_train_imputed, df_test_imputed, list_boxcox=list_boxcox, list_yeo=list_yeo, list_log=list_log, list_sqrt=list_sqrt)
 
         advance_progress(n_steps_total)
