@@ -1714,13 +1714,19 @@ if valid_wrang:
             st.dataframe(pd.DataFrame(description_train), use_container_width=True, hide_index=True)
         
             with st.expander("Diagnostic des données", expanded=False):
-                st.write("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
-                plt = heatmap_corr(corr_mat_train)
-                st.pyplot(plt, use_container_width=True)
+                if corr_mat_train is not None and not corr_mat_train.empty:
+                    st.write("**Matrice de corrélation entre les valeurs manquantes (train), en % :**")
+                    plt = heatmap_corr(corr_mat_train)
+                    st.pyplot(plt, use_container_width=True)
+                else:
+                    st.info("Aucune matrice de corrélation entre les valeurs manquantes n'est disponible pour l'ensemble d'entraînement.")
 
-                st.write("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
-                plt = heatmap_corr(corr_mat_test)
-                st.pyplot(plt, use_container_width=True)
+                if corr_mat_test is not None and not corr_mat_test.empty:
+                    st.write("**Matrice de corrélation entre les valeurs manquantes (test), en % :**")
+                    plt = heatmap_corr(corr_mat_test)
+                    st.pyplot(plt, use_container_width=True)
+                else:
+                    st.info("Aucune matrice de corrélation entre les valeurs manquantes n'est disponible pour l'ensemble de test.")
 
                 st.write("**Proportion de valeurs manquantes par variable (train), en % :**")
                 st.dataframe(prop_nan_train.sort_values(by='NaN proportion', ascending=False), use_container_width=True)
@@ -1972,9 +1978,12 @@ if valid_wrang:
             st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
             
             with st.expander("Diagnostic des données", expanded=False):
-                st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
-                plt = heatmap_corr(corr_mat)
-                st.pyplot(plt, use_container_width=True)
+                if not corr_mat.empty:
+                    st.write("**Matrice de corrélation entre les valeurs manquantes (en %) :**")
+                    plt = heatmap_corr(corr_mat)
+                    st.pyplot(plt, use_container_width=True)
+                else:
+                    st.info("Aucune corrélation entre les valeurs manquantes n'a été détectée.")
                                 
                 st.write("**Proportion de valeurs manquantes par variable (en %) :**")
                 st.dataframe(prop_nan.sort_values(by='NaN Proportion', ascending=False), use_container_width=True)
