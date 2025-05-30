@@ -1018,48 +1018,60 @@ def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
                                      (régression) ou au nombre de classes (classification).
     """
     # Initialisation
-    rng = np.random.RandomState(random_seed)
-    kf = KFold(n_splits=cv, shuffle=True, random_state=rng)
-
-    all_pred = []
-    y_tests = []
+    kf = KFold(n_splits=cv, shuffle=True, random_state=random_seed)
+    all_preds = []
+    all_ys = []
 
     # Boucle sur les folds de validation croisée
     for train_idx, test_idx in kf.split(X):
         X_train_fold, X_test_fold = X[train_idx], X[test_idx]
         y_train_fold, y_test_fold = y[train_idx], y[test_idx]
         model = estimator.fit(X_train_fold, y_train_fold)
-        preds = model.predict(X_test_fold)
-        
-        all_pred.append(preds)
-        y_tests.append(y_test_fold)
+        y_pred = model.predict(X_test)
 
-    all_pred = np.concatenate(all_pred)
-    y_tests = np.concatenate(y_tests)
+        all_preds.append(y_pred)
+        all_ys.append(y_test)
+
+    y_true = np.concatenate(all_ys)
+    y_preds = np.concatenate(all_preds)
 
     if task == "Classification":
-        # Classification : calcul de la majorité des prédictions (mode)
-        main_predictions = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=0, arr=all_pred.astype(int))
-        avg_expected_loss = np.mean(all_pred != y_tests)
-        avg_bias = np.mean(main_predictions != y_tests)
-        avg_var = np.mean((all_pred != main_predictions).astype(int))
+        y_preds = y_preds.astype(int)
+        y_true = y_true.astype(int)
 
-        # Calcul du biais et de la variance relatifs
-        bias_relative = np.mean(main_predictions != y_tests) / len(np.unique(y_tests))  # Par rapport au nombre de classes
-        var_relative = np.mean((all_pred != main_predictions).astype(int)) / len(np.unique(y_tests))  # Par rapport au nombre de classes
+        # Reconstruction par folds pour mode par observation
+        y_preds_split = np.array_split(y_preds, cv)
+
+        preds_by_fold = [[] for _ in range(len(y_true))]
+        idx = 0
+        for fold_preds in y_preds_split:
+            for i, pred in enumerate(fold_preds):
+                preds_by_fold[idx + i].append(pred)
+            idx += len(fold_preds)
+
+        mode_preds = np.array([mode(p)[0][0] for p in preds_by_fold])
+        avg_expected_loss = np.mean(y_preds != y_true)
+        bias = np.mean(mode_preds != y_true)
+        variance = np.mean([
+            np.mean(np.array(p) != mode_p)
+            for p, mode_p in zip(preds_by_fold, mode_preds)
+        ])
+
+        bias_relative = bias / avg_expected_loss if avg_expected_loss > 0 else np.nan
+        variance_relative = variance / avg_expected_loss if avg_expected_loss > 0 else np.nan
         
     else:
         # Régression : calcul de la moyenne des prédictions
-        main_predictions = np.mean(all_pred, axis=0)
-        avg_expected_loss = np.mean((all_pred - y_tests) ** 2)
-        avg_bias = np.mean(main_predictions - y_tests)
-        avg_var = np.mean((all_pred - main_predictions) ** 2)
+        avg_expected_loss = np.mean((y_preds - y_true) ** 2)
+        bias = np.mean(np.mean(y_preds) - y_true)
+        bias_squared = np.mean((np.mean(y_preds) - y_true) ** 2)
+        variance = np.mean((y_preds - np.mean(y_preds)) ** 2)
 
         # Calcul du biais et de la variance relatifs
-        bias_relative = np.mean(main_predictions - y_tests) / np.std(y_tests)  # Par rapport à l'écart-type de y
-        var_relative = np.mean((all_pred - main_predictions) ** 2) / np.var(y_tests)  # Par rapport à la variance de y
+        bias_relative = bias_squared / avg_expected_loss if avg_expected_loss > 0 else np.nan
+        variance_relative = variance / avg_expected_loss if avg_expected_loss > 0 else np.nan
 
-    return avg_expected_loss, avg_bias, avg_var, bias_relative, var_relative
+    return avg_expected_loss, bias, variance, bias_relative, variance_relative
 
 def instance_model(index, df, task):
     # Récupérer le nom du modèle depuis df_train
