@@ -2170,7 +2170,7 @@ if valid_mod:
         }, inplace=True)
 
     # Derniers traitement
-    df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
+    df_score = df_score.drop(columns=['Scores moyens', 'Ecart-type des scores'])
     df_score.index = df_train2.index
     df_score2 = df_score.drop(columns='Meilleur modèle')
     st.subheader("Validation des modèles")
