@@ -1063,7 +1063,7 @@ def bias_variance_decomp(estimator, X, y, task, cv=5, random_seed=None):
     else:
         # Régression : calcul de la moyenne des prédictions
         avg_expected_loss = np.mean((y_preds - y_true) ** 2)
-        bias = np.mean(np.mean(y_preds) - y_true)
+        bias = np.mean(y_preds - y_true)
         bias_squared = np.mean((np.mean(y_preds) - y_true) ** 2)
         variance = np.mean((y_preds - np.mean(y_preds)) ** 2)
 
