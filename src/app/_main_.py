@@ -1529,7 +1529,10 @@ if valid_wrang:
             
         # Imputer les valeurs manquantes
         with st.spinner("Imputation des données manquantes..."):
-            df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
+            if not corr_mat.empty:
+                df_train_imputed, df_test_imputed, scores_supervised, imputation_report = impute_missing_values(df_train_outliers, df_test_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
+            else:
+                df_train_imputed, df_test_imputed, scores_supervised, imputation_report = df_train_outliers.copy(), df_test_outliers.copy(), None, None
         
         advance_progress(n_steps_total)
         
@@ -1706,7 +1709,7 @@ if valid_wrang:
                 description_train.append({
                     'Variable': col,
                     'Type': var_type,
-                    'Nb modalités': n_modalites
+                    'Nombre de modalités': n_modalites
                 })
             st.dataframe(pd.DataFrame(description_train), use_container_width=True, hide_index=True)
         
@@ -1841,8 +1844,11 @@ if valid_wrang:
 
         # Imputation des valeurs manquantes
         with st.spinner("Imputation des valeurs manquantes..."):
-            df_imputed, _, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
-        advance_progress(n_steps_total)
+            if not corr_mat.empty:
+                df_imputed, _, scores_supervised, imputation_report = impute_missing_values(df_outliers, target=target, prop_nan=prop_nan, corr_mat=corr_mat)
+            else:
+                df_imputed, _, scores_supervised, imputation_report = df_outliers.copy(), None, None
+        advance_progress(n_steps_total)        
 
         # Suppression des variables redondantes
         with st.spinner("Suppression des variables redondantes..."):
@@ -1961,7 +1967,7 @@ if valid_wrang:
                 description.append({
                     'Variable': col,
                     'Type': var_type,
-                    'Nb modalités': n_modalites
+                    'Nombre modalités': n_modalites
                 })
             st.dataframe(pd.DataFrame(description), use_container_width=True, hide_index=True)
             
@@ -1978,10 +1984,11 @@ if valid_wrang:
                 st.write("**Nombre d'observations supprimées car la variable cible est manquante :**", len_diff_nan_target)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
 
-                st.write("**Résumé des méthodes d'imputation utilisées :**")
-                st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+                if imputation_report is not None:
+                    st.write("**Résumé des méthodes d'imputation utilisées :**")
+                    st.dataframe(imputation_report, use_container_width=True, hide_index=True)
 
-                if not scores_supervised.empty:
+                if not scores_supervised.empty or scores_supervised is not None:
                     st.write("**Score de l'imputation supervisée :**")
                     st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
