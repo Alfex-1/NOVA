@@ -1748,6 +1748,8 @@ if valid_wrang:
                     if not scores_supervised.empty:
                         st.write("**Score de l'imputation supervisée :**")
                         st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucun score d'imputation supervisée disponible.")
                 
                 df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
 
@@ -2002,6 +2004,8 @@ if valid_wrang:
                     if not scores_supervised.empty:
                         st.write("**Score de l'imputation supervisée :**")
                         st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucun score d'imputation supervisée disponible.")
                 
                 df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
                 # Détection du cas "aucune redondance globale"
