@@ -1741,8 +1741,12 @@ if valid_wrang:
                     st.write("**Nombre d'observations supprimées car la variable cible est manquante (test) :**", len_diff_nan_target_test)
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
 
-                st.write("**Résumé des méthodes d'imputation utilisées :**")
-                st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+                if imputation_report is not None:
+                    if not imputation_report.empty:  
+                        st.write("**Résumé des méthodes d'imputation utilisées :**")
+                        st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucun rapport d'imputation disponible.")
 
                 if scores_supervised is not None:
                     if not scores_supervised.empty:
@@ -1997,8 +2001,11 @@ if valid_wrang:
                 st.write("**Nombre d'outliers traités :**", nb_outliers)
 
                 if imputation_report is not None:
-                    st.write("**Résumé des méthodes d'imputation utilisées :**")
-                    st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+                    if not scores_supervised.empty:
+                        st.write("**Résumé des méthodes d'imputation utilisées :**")
+                        st.dataframe(imputation_report, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucun rapport d'imputation disponible.")
 
                 if scores_supervised is not None:
                     if not scores_supervised.empty:
