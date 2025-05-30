@@ -1066,7 +1066,7 @@ def instance_model(index, df, task):
     model_name = index
     
     # Récupérer les hyperparamètres pour ce modèle
-    best_params = df.loc[index, 'Best Params']
+    best_params = df.loc[index, 'Meilleurs hyperparamètres']
     
     # Déterminer l'instance du modèle selon le nom et la tâche (Classification ou Regression)
     if model_name == 'KNN':
