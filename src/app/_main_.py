@@ -1744,9 +1744,10 @@ if valid_wrang:
                 st.write("**Résumé des méthodes d'imputation utilisées :**")
                 st.dataframe(imputation_report, use_container_width=True, hide_index=True)
 
-                if not scores_supervised.empty:
-                    st.write("**Score de l'imputation supervisée :**")
-                    st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                if scores_supervised is not None:
+                    if not scores_supervised.empty:
+                        st.write("**Score de l'imputation supervisée :**")
+                        st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
                 df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
 
@@ -1997,9 +1998,10 @@ if valid_wrang:
                     st.write("**Résumé des méthodes d'imputation utilisées :**")
                     st.dataframe(imputation_report, use_container_width=True, hide_index=True)
 
-                if not scores_supervised.empty or scores_supervised is not None:
-                    st.write("**Score de l'imputation supervisée :**")
-                    st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
+                if scores_supervised is not None:
+                    if not scores_supervised.empty:
+                        st.write("**Score de l'imputation supervisée :**")
+                        st.dataframe(scores_supervised, use_container_width=True, hide_index=True)
                 
                 df_vars_to_drop = pd.DataFrame(cramer_to_drop, columns=["Variables supprimées"])
                 # Détection du cas "aucune redondance globale"
