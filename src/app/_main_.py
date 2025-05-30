@@ -2105,9 +2105,9 @@ if valid_mod:
                 n_trials=n_trial, n_jobs=-1
             )
             results.append({
-                'Model': model,
-                'Best Model': best_model,
-                'Best Params': best_params
+                'Modèle': model,
+                'Meilleur modèle': best_model,
+                'Meilleurs hyperparamètres': best_params
             })
         advance_progress(n_steps_total)
 
@@ -2115,14 +2115,14 @@ if valid_mod:
     df_train = pd.DataFrame(results)
 
     df_train2=df_train.copy()        
-    df_train2.set_index('Model', inplace=True)
-    df_train2["Best Model"] = df_train2["Best Model"].astype(str)
+    df_train2.set_index('Modèle', inplace=True)
+    df_train2["Meilleur modèle"] = df_train2["Meilleur modèle"].astype(str)
       
-    st.dataframe(df_train2.drop(columns='Best Params'), use_container_width=True)
+    st.dataframe(df_train2.drop(columns='Meilleurs hyperparamètres'), use_container_width=True)
     
     # Evaluer les meilleurs modèles
     with st.spinner("Validation croisée sur les meilleurs modèles..."):
-        list_models = df_train['Best Model'].tolist()
+        list_models = df_train['Meilleur modèle'].tolist()
         list_score = []
         for model in list_models:  # Utilise les vrais objets modèles
             scores = cross_validate(model, X_test, y_test, cv=cv, scoring=scoring_eval, n_jobs=-1)
@@ -2130,9 +2130,9 @@ if valid_mod:
             std_scores = {metric: scores[f'test_{metric}'].std().round(5) for metric in scoring_eval}
 
             list_score.append({
-                'Best Model': str(model),  # Affichage du nom seulement
-                'Mean Scores': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
-                'Std Scores': std_scores
+                'Meilleur modèle': str(model),  # Affichage du nom seulement
+                'Scores moyens': {metric: (val * 100).round(2) if task == "Classification" else -val.round(3) for metric, val in mean_scores.items()},
+                'Ecart-type des scores': std_scores
             })
     advance_progress(n_steps_total)
 
@@ -2158,26 +2158,26 @@ if valid_mod:
     inv_metrics = {v: k for k, v in metrics_regression.items()} if task == "Regression" else {v: k for k, v in metrics_classification.items()}
 
     for metric in scoring_eval:
-        df_score[f'Mean {metric}'] = df_score['Mean Scores'].apply(lambda x: x[metric])
-        df_score[f'Std {metric}'] = df_score['Std Scores'].apply(lambda x: x[metric])
+        df_score[f'Moyenne {metric}'] = df_score['Scores moyens'].apply(lambda x: x[metric])
+        df_score[f'Ecart-type {metric}'] = df_score['Ecart-type des scores'].apply(lambda x: x[metric])
         
     # Renommage des colonnes pour des noms plus lisibles
     for metric in scoring_eval:
         clean_metric = inv_metrics.get(metric, metric)  # Fallback si absent
         df_score.rename(columns={
-            f"Mean {metric}": f"Mean - {clean_metric}",
-            f"Std {metric}": f"Std - {clean_metric}"
+            f"Moyenne {metric}": f"Moyenne - {clean_metric}",
+            f"Ecart-type {metric}": f"Ecart-type - {clean_metric}"
         }, inplace=True)
 
     # Derniers traitement
     df_score = df_score.drop(columns=['Mean Scores', 'Std Scores'])
     df_score.index = df_train2.index
-    df_score2 = df_score.drop(columns='Best Model')
+    df_score2 = df_score.drop(columns='Meilleur modèle')
     st.subheader("Validation des modèles")
     st.dataframe(df_score2, use_container_width=True)
     
     # Afficher les coefficients des modèles linéaires
-    for idx, best_model in df_score['Best Model'].items():
+    for idx, best_model in df_score['Meilleur modèle'].items():
         model = instance_model(idx, df_train2, task)
 
         if task == 'Regression' and isinstance(model, (LinearRegression, ElasticNet, Ridge, Lasso)):
@@ -2246,7 +2246,7 @@ if valid_mod:
                  
     
     # Calculer les odds-ratios pour la régression logistique
-    for idx, best_model in df_score['Best Model'].items():
+    for idx, best_model in df_score['Meilleur modèle'].items():
         model = instance_model(idx, df_train2, task)
         if isinstance(model, LogisticRegression) and task == 'Classification':
             model.fit(X_train, y_train)
@@ -2261,7 +2261,7 @@ if valid_mod:
     # Afficher SHAPE et LIME
     st.subheader("Interprétation globale ou locale des modèles")
     with st.spinner("Interprétation des modèles..."):       
-        for idx, best_model in df_score['Best Model'].items():
+        for idx, best_model in df_score['Meilleur modèle'].items():
             model = instance_model(idx, df_train2, task)
             model.fit(X_train, y_train)
 
@@ -2304,7 +2304,7 @@ if valid_mod:
     # Appliquer le modèle : calcul-biais-variance    
     with st.spinner("Calcul biais-variance..."):
         bias_variance_results = []
-        for idx, best_model in df_score['Best Model'].items():
+        for idx, best_model in df_score['Meilleur modèle'].items():
             model = instance_model(idx, df_train2, task)
             expected_loss, bias, var, bias_relative, var_relative = bias_variance_decomp(
                 model, task=task,
@@ -2345,7 +2345,7 @@ if valid_mod:
     with st.spinner("Calcul de la matrice de confusion..."):
         if task == 'Classification':
             st.subheader(f"Bilan des Erreurs de Classification")
-            for index, model in df_score['Best Model'].items():
+            for index, model in df_score['Meilleur modèle'].items():
                 model = instance_model(idx, df_train2, task)
                 model.fit(X_train, y_train)
                 y_pred = model.predict(X_test)
@@ -2366,7 +2366,7 @@ if valid_mod:
                 
                 plt.xlabel("Prédictions", fontsize=5)  # Taille de l'étiquette X
                 plt.ylabel("Réalité", fontsize=5)  # Taille de l'étiquette Y
-                plt.title(f"Confusion Matrix - {index}", fontsize=7)  # Taille du titre
+                plt.title(f"Matrice de confusion - {index}", fontsize=7)  # Taille du titre
                 
                 st.pyplot(fig)
                 plt.close(fig)
@@ -2375,7 +2375,7 @@ if valid_mod:
     # Feature importance
     st.subheader(f"Importance des variables")
     with st.spinner("Calcul de l'importance des variables..."):
-        for idx, mdl in df_score['Best Model'].items():
+        for idx, mdl in df_score['Meilleur modèle'].items():
             model = instance_model(idx, df_train2, task)
             model.fit(X_train, y_train)
             
@@ -2410,7 +2410,7 @@ if valid_mod:
     st.subheader(f"Courbes d'apprentissage")
     
     with st.spinner("Traçage des courbes d'apprentissage..."):
-        for idx, mdl in df_score['Best Model'].items(): 
+        for idx, mdl in df_score['Meilleur modèle'].items(): 
             model = instance_model(idx, df_train2, task)       
             train_sizes, train_scores, test_scores = learning_curve(
                 model, X_train, y_train, cv=cv, scoring=scoring_comp,
