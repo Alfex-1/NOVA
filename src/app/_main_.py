@@ -1,41 +1,50 @@
 # Imports
+import io
+import os
+import zipfile
+from io import BytesIO
+
 import numpy as np
 import pandas as pd
 import polars as pl
-from matplotlib import pyplot as plt
+
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
+from matplotlib import pyplot as plt
+
 import seaborn as sns
 import plotly.express as px
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, QuantileTransformer
-from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder, PowerTransformer, LabelEncoder
-from scipy import stats
-from scipy.stats import ks_2samp, chi2_contingency
-from sklearn.ensemble import RandomForestRegressor, IsolationForest, RandomForestClassifier
-from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.linear_model import Lasso, Ridge, ElasticNet, LinearRegression, LogisticRegression
-from sklearn.decomposition import PCA
-from sklearn.model_selection import KFold, train_test_split, cross_validate, learning_curve, cross_val_score
-from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
-from sklearn.utils.multiclass import type_of_target
-from sklearn.inspection import permutation_importance
+
+from PIL import Image
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+import shap
+import networkx as nx
+import optuna
+from optuna.pruners import SuccessiveHalvingPruner
+from optuna.samplers import TPESampler
+
 import xgboost as xgb
 import lightgbm as lgb
-import optuna
-from optuna.samplers import TPESampler
-from optuna.pruners import SuccessiveHalvingPruner
-from sklearn.metrics import confusion_matrix, f1_score, mean_absolute_error, mean_absolute_percentage_error
-import io
-from io import BytesIO
-import os
-import streamlit as st
-from PIL import Image
-import zipfile
-import shap
+
 from lime.lime_tabular import LimeTabularExplainer
-import streamlit.components.v1 as components
-import networkx as nx
+
+from scipy import stats
+from scipy.stats import chi2_contingency, ks_2samp
+
+from sklearn.decomposition import PCA
+from sklearn.ensemble import IsolationForest, RandomForestClassifier, RandomForestRegressor
+from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, LogisticRegression, Ridge
+from sklearn.metrics import confusion_matrix, f1_score, mean_absolute_error, mean_absolute_percentage_error
+from sklearn.model_selection import KFold, cross_validate, cross_val_score, learning_curve, train_test_split
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor, LocalOutlierFactor
+from sklearn.preprocessing import (MinMaxScaler, OneHotEncoder, OrdinalEncoder, LabelEncoder, PowerTransformer, QuantileTransformer, RobustScaler, StandardScaler)
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.utils.multiclass import type_of_target
 
 def load_file(file_data):
     """
@@ -2333,7 +2342,7 @@ if valid_mod:
             
             # Logique de conclusion en fonction du biais relatif et de la variance relative
             if abs(bias_relative) > 0.2 and var_relative > 0.2:
-                result["Conclusion"] = "Problème majeur : le modèle est vraisembbalement pas adapté"
+                result["Conclusion"] = "Problème majeur : le modèle n'est vraisembbalement pas adapté (trop de biais et trop de variance relatifs)"
             elif abs(bias_relative) > 0.2:
                 result["Conclusion"] = "Biais élevé : suspicion de sous-ajustement"
             elif var_relative > 0.2:
